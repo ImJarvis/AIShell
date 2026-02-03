@@ -1,0 +1,16 @@
+# Visual Studio files
+.vs/
+out/
+build/
+
+# Libraries (We want people to clone these themselves)
+glfw/
+imgui/
+llama.cpp/
+
+# Models (Never upload 600MB+ models to GitHub)
+models/
+
+# Executables
+*.exe
+*.bin
