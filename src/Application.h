@@ -3,6 +3,7 @@
 #include "InputManager.h"
 #include "GuiRenderer.h"
 #include <memory>
+#include "LlamaManager.h" 
 
 class Application {
 public:
@@ -13,6 +14,7 @@ private:
     std::unique_ptr<Window> m_Window;
     std::unique_ptr<InputManager> m_Input;
     std::unique_ptr<GuiRenderer> m_Gui;
+    std::unique_ptr<LlamaManager> m_Llama;
     
     const int WIDTH = 600;
     const int HEIGHT = 400;
