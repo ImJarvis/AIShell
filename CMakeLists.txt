@@ -68,7 +68,7 @@ add_executable(AIHollowShell
     ${APP_SOURCES} 
     ${IMGUI_SOURCES}
     ${COMMON_HELPER_SRCS}
-)
+ "src/Application.cpp" "src/LlamaManager.cpp")
 
 # 7. Include Paths
 target_include_directories(AIHollowShell PRIVATE

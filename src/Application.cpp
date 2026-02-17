@@ -1,26 +1,23 @@
 #include "Application.h"
+#include <future>
 
-Application::Application() {
-    // 1. Init Window
+Application::Application()
+{
+    // If you want the window to be resizeable by the OS, ensure your Window class allows it.
+    // Assuming standard GLFW/Win32 window creation here.
     m_Window = std::make_unique<Window>(WIDTH, HEIGHT, "Hollow Shell");
-    
-    // 2. Init Input (Needs Win32 Handle from Window)
     m_Input = std::make_unique<InputManager>(m_Window->GetWin32Handle());
-    
-    // 3. Init GUI (Needs GLFW Handle from Window)
     m_Gui = std::make_unique<GuiRenderer>(m_Window->GetNativeHandle());
-
     m_Llama = std::make_unique<LlamaManager>("tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf");
-    //m_Llama->LoadModel();
 }
+
 void Application::Run() {
-    // 1. Persistent state for the UI (static so they survive the loop)
-    static char inputBuffer[256] = "";
-    static std::string aiResponse = "Hollow Shell V1.0 initialized. Awaiting command...";
+    static char inputBuffer[512] = "";
+    static std::string aiResponse = "Hollow Shell V1.0 initialized. Awaiting Prompt...";
     static bool scrollToBottom = false;
 
     while (!m_Window->ShouldClose()) {
-        // Process Alt+I Hotkey
+        // 1. OS Message Handling
         if (m_Window->ProcessOSMessages(1)) {
             if (m_Window->IsVisible()) m_Window->Hide();
             else {
@@ -30,42 +27,54 @@ void Application::Run() {
         }
 
         if (!m_Window->IsVisible()) {
-            Sleep(16);
+            std::this_thread::sleep_for(std::chrono::milliseconds(16));
             continue;
         }
 
-        // --- RENDER PREPARATION ---
+        // 2. Async Response Handling
+        if (m_IsThinking && m_AiThread.valid()) {
+            if (m_AiThread.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                aiResponse = m_AiThread.get();
+                m_IsThinking = false;
+                scrollToBottom = true;
+            }
+        }
+
+        // 3. Render Prep
         int dw, dh;
         glfwGetFramebufferSize(m_Window->GetNativeHandle(), &dw, &dh);
         glViewport(0, 0, dw, dh);
-
-        // Background: 0 alpha makes the actual GL window transparent if your OS allows it
-        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // Solid black background (change alpha to 0.0f for transparent)
         glClear(GL_COLOR_BUFFER_BIT);
 
         m_Gui->BeginFrame();
 
-        // --- HOLLOW SHELL TERMINAL UI ---
-        // Force the window to fill the entire application area
+        // --- SENIOR FIX: DOCKING LOGIC ---
+        // Instead of a floating window, we anchor the UI to the OS Window Viewport.
+        // This means the "Black Window" IS the terminal.
         ImGui::SetNextWindowPos(ImVec2(0, 0));
-        ImGui::SetNextWindowSize(ImVec2((float)dw, (float)dh));
+        ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
 
-        // Flags for the "Hollow" look: No background, no title, no resize
+        // Flags: NoTitleBar (because the OS has one), NoResize (it resizes with OS window), NoMove (it stays docked)
         ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar;
+            ImGuiWindowFlags_NoBackground;
 
-        ImGui::Begin("HollowShellTerminal", nullptr, flags);
+        ImGui::Begin("Terminal", nullptr, flags);
 
-        // Set text color to Terminal Green
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
+        // Styling
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.0f, 1.0f)); // Matrix Green
 
-        ImGui::Text(">> SYSTEM_READY");
+        ImGui::Text(">> SYSTEM_STATUS: %s", m_IsThinking ? "ANALYZING..." : "ONLINE");
         ImGui::Separator();
 
-        // Display the AI response area
-        ImGui::BeginChild("ScrollingRegion", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), false, ImGuiWindowFlags_HorizontalScrollbar);
+        // 4. Output Log
+        // We use 0 flags to allow standard scrolling behavior.
+        // -GetFrameHeightWithSpacing() reserves exactly enough room for the input box at the bottom.
+        ImGui::BeginChild("ScrollingRegion", ImVec2(0, -ImGui::GetFrameHeightWithSpacing()), false, 0);
+
         ImGui::TextWrapped("AI: %s", aiResponse.c_str());
+
         if (scrollToBottom) {
             ImGui::SetScrollHereY(1.0f);
             scrollToBottom = false;
@@ -74,32 +83,36 @@ void Application::Run() {
 
         ImGui::Separator();
 
-        // The Input Box
-        ImGui::Text("Enter Prompt: "); ImGui::SameLine();
+        // 5. Input Area
+        ImGui::Text("User@Shell:~$ "); ImGui::SameLine();
 
-        // Focus the input box automatically when the window appears
-        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        if (m_IsThinking) ImGui::BeginDisabled();
 
-        // EnterReturnsTrue means the 'if' triggers only when you press ENTER
+        // Auto-focus logic
+        if (ImGui::IsWindowAppearing() || !m_IsThinking) ImGui::SetKeyboardFocusHere();
+
         if (ImGui::InputText("##cmd", inputBuffer, IM_ARRAYSIZE(inputBuffer), ImGuiInputTextFlags_EnterReturnsTrue)) {
-
-            // --- TEST THE PROMPT ---
             std::string userInput(inputBuffer);
-            if (!userInput.empty()) {
-                // This call is SYNCHRONOUS. The GUI will freeze while the AI thinks.
-                aiResponse = m_Llama->GenerateCommand(userInput);
+            if (!userInput.empty() && m_Llama) {
+                m_IsThinking = true;
+                aiResponse = "Processing...";
 
-                // Clear input buffer for next command
+                // Note: Improved prompt injection
+                std::string inputStr = userInput;
+
+                m_AiThread = std::async(std::launch::async, [this, inputStr]() {
+                    return m_Llama->GenerateCommand(inputStr);
+                    });
+
                 memset(inputBuffer, 0, sizeof(inputBuffer));
                 scrollToBottom = true;
             }
-
-            // Refocus after sending
             ImGui::SetKeyboardFocusHere(-1);
         }
 
-        ImGui::PopStyleColor(); // Restore standard colors
+        if (m_IsThinking) ImGui::EndDisabled();
 
+        ImGui::PopStyleColor();
         ImGui::End();
 
         m_Gui->EndFrame();

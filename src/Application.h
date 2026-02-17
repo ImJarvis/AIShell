@@ -4,6 +4,7 @@
 #include "GuiRenderer.h"
 #include <memory>
 #include "LlamaManager.h" 
+#include <future>
 
 class Application {
 public:
@@ -18,4 +19,12 @@ private:
     
     const int WIDTH = 600;
     const int HEIGHT = 400;
+    //std::unique_ptr<LlamaManager> m_Llama;
+
+    // NEW MEMBERS FOR STABILITY
+    std::future<std::string> m_AiThread; // Tracks the background AI task
+    bool m_IsThinking = false;           // State flag
+    std::string m_aiResponse = "Hollow Shell initialized. Ready.";
+
+
 };
