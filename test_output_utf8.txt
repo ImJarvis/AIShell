@@ -1,0 +1,16 @@
+﻿========================================
+   AI HOLLOW SHELL - MODULE TESTER      
+========================================
+
+--- Testing Shell Execution ---
+[PASS] Echo command exit code
+[PASS] Echo output content
+
+--- Testing Command Parsing ---
+out\build\x64-Release\ShellTests.exe : [FAIL] Standard [CMD] tag extraction (Expected: 'dir /w', Got: '
+At line:1 char:1
++ out\build\x64-Release\ShellTests.exe > test_output.txt 2>&1; powershe ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([FAIL] Standard...dir /w', Got: ':String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

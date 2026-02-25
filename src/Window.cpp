@@ -3,9 +3,11 @@
 Window::Window(int width, int height, const char* title) {
     glfwInit();
     
-    // Frameless & Floating Setup
+    // Resizable & Opaque Setup
     glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
     glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
+    glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); // Start hidden
 
     m_Window = glfwCreateWindow(width, height, title, nullptr, nullptr);
@@ -50,4 +52,12 @@ bool Window::ProcessOSMessages(int hotkeyId) {
 
 HWND Window::GetWin32Handle() {
     return glfwGetWin32Window(m_Window);
+}
+
+void Window::GetPosition(int* x, int* y) {
+    glfwGetWindowPos(m_Window, x, y);
+}
+
+void Window::SetPosition(int x, int y) {
+    glfwSetWindowPos(m_Window, x, y);
 }

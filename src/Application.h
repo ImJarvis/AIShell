@@ -4,7 +4,10 @@
 #include "GuiRenderer.h"
 #include <memory>
 #include "LlamaManager.h" 
+#include "ShellManager.h"
 #include <future>
+#include <mutex>
+#include <atomic>
 
 class Application {
 public:
@@ -19,12 +22,18 @@ private:
     
     const int WIDTH = 600;
     const int HEIGHT = 400;
-    //std::unique_ptr<LlamaManager> m_Llama;
 
-    // NEW MEMBERS FOR STABILITY
-    std::future<std::string> m_AiThread; // Tracks the background AI task
-    bool m_IsThinking = false;           // State flag
+    // AI & Execution State
+    std::future<std::string> m_AiThread; 
+    std::future<ShellManager::ExecuteResult> m_ExecThread;
+    bool m_IsThinking = false;           
+    bool m_IsExecuting = false;
+    std::mutex m_ResponseMutex;
+    
     std::string m_aiResponse = "Hollow Shell initialized. Ready.";
-
-
+    std::string m_CommandExplanation = "";
+    std::string m_LastGeneratedCommand = "";
+    std::string m_TerminalOutput = "";
+    std::atomic<bool> m_ScrollToBottom = false;
+    bool m_CommandVerified = false;
 };

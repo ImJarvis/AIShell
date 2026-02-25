@@ -68,7 +68,14 @@ add_executable(AIHollowShell
     ${APP_SOURCES} 
     ${IMGUI_SOURCES}
     ${COMMON_HELPER_SRCS}
- "src/Application.cpp" "src/LlamaManager.cpp")
+    "src/CommandParser.cpp"
+)
+
+# 6b. Create Test Executable
+add_executable(ShellTests 
+    tests/TestRunner.cpp 
+    "src/CommandParser.cpp"
+)
 
 # 7. Include Paths
 target_include_directories(AIHollowShell PRIVATE
@@ -80,14 +87,19 @@ target_include_directories(AIHollowShell PRIVATE
     "${LLAMA_DIR}/common"
 )
 
+target_include_directories(ShellTests PRIVATE
+    "${CMAKE_SOURCE_DIR}/src"
+)
+
 # 8. Linking
-# NOTE: We do NOT link 'common' or 'common.lib' here.
 target_link_libraries(AIHollowShell PRIVATE 
     llama       
     ggml
     opengl32
     "${GLFW_DIR}/lib-vc2022/glfw3.lib"
 )
+
+target_link_libraries(ShellTests PRIVATE)
 
 # 9. MSVC Fixes
 if(MSVC)

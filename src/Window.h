@@ -23,6 +23,10 @@ public:
     GLFWwindow* GetNativeHandle() { return m_Window; }
     HWND GetWin32Handle();
 
+    // Position & Drag
+    void GetPosition(int* x, int* y);
+    void SetPosition(int x, int y);
+
 private:
     GLFWwindow* m_Window;
     bool m_IsVisible = false;
