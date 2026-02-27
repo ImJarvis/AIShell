@@ -110,10 +110,13 @@ public:
         bool hasCmdlet = (firstHyphen != std::string::npos && (firstSpace == std::string::npos || firstHyphen < firstSpace));
         bool hasPsVar = (command.find("$") != std::string::npos);
         bool hasCmdLogic = (command.find("&&") != std::string::npos || command.find("||") != std::string::npos);
-
+        bool startsWithPs = (command.find("powershell") == 0 || command.find("pwsh") == 0 || 
+                             command.find("Get-") == 0 || command.find("Set-") == 0 || 
+                             command.find("New-") == 0);
+        
         // Heuristic: If it has &&, it MUST be CMD (PS 5.1 doesn't support it).
-        // Otherwise, look for Get-Item, Set-Content, etc.
-        bool isPowerShell = !hasCmdLogic && (hasCmdlet || hasPsVar);
+        // Otherwise, look for Get-Item, Set-Content, powershell keyword, etc.
+        bool isPowerShell = !hasCmdLogic && (hasCmdlet || hasPsVar || startsWithPs);
 
         if (isPowerShell) {
             std::string escaped = "";

@@ -211,23 +211,37 @@ void Application::Run() {
             ImGui::EndChild();
             ImGui::SameLine();
             // TERMINAL PANE
-            ImGui::BeginChild("ExecPane", ImVec2(0, availableHeight), true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
-            ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[TERMINAL]");
-            
-            if (m_IsExecuting) {
-                ImGui::SameLine(ImGui::GetContentRegionAvail().x - 50);
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.1f, 0.1f, 1.0f));
-                if (ImGui::SmallButton("STOP")) {
-                    m_StopExecution = true;
-                }
-                ImGui::PopStyleColor();
-            }
+            ImGui::BeginGroup();
+                // Fixed Header Area
+                ImGui::BeginChild("ExecHeader", ImVec2(0, 35), true, ImGuiWindowFlags_NoScrollbar);
+                    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[TERMINAL]");
+                    
+                    if (m_IsExecuting) {
+                        float time = (float)ImGui::GetTime();
+                        float blink = (sinf(time * 10.0f) + 1.0f) * 0.5f; // Faster blink for urgency
+                        
+                        ImGui::SameLine(ImGui::GetContentRegionAvail().x - 70);
+                        
+                        // Blinking red color
+                        ImVec4 stopColor = ImVec4(0.5f + blink * 0.5f, 0.0f, 0.0f, 1.0f);
+                        ImGui::PushStyleColor(ImGuiCol_Button, stopColor);
+                        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(1.0f, 0.2f, 0.2f, 1.0f));
+                        
+                        if (ImGui::Button("STOP !!", ImVec2(70, 0))) {
+                            m_StopExecution = true;
+                        }
+                        ImGui::PopStyleColor(2);
+                    }
+                ImGui::EndChild();
 
-            std::lock_guard<std::mutex> lock(m_ResponseMutex);
-            ImGui::TextWrapped("%s", m_TerminalOutput.empty() ? "(No output)" : m_TerminalOutput.c_str());
-            if (m_IsExecuting) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "\n> RUNNING...");
-            if (m_ScrollToBottom) { ImGui::SetScrollHereY(1.0f); m_ScrollToBottom = false; }
-            ImGui::EndChild();
+                // Scrolling Output Area
+                ImGui::BeginChild("ExecContent", ImVec2(0, availableHeight - 35), true, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+                    std::lock_guard<std::mutex> lock(m_ResponseMutex);
+                    ImGui::TextWrapped("%s", m_TerminalOutput.empty() ? "(No output)" : m_TerminalOutput.c_str());
+                    if (m_IsExecuting) ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "\n> RUNNING...");
+                    if (m_ScrollToBottom) { ImGui::SetScrollHereY(1.0f); m_ScrollToBottom = false; }
+                ImGui::EndChild();
+            ImGui::EndGroup();
         }
 
         // --- FOOTER SECTION ---
