@@ -1,6 +1,6 @@
-# AI Hollow Shell 🐚
+# Terminal on AI 🐚
 
-**AI Hollow Shell** is a specialized, local-first Windows CLI assistant designed for system administrators and power users. It leverages local LLMs (Large Language Models) to translate natural language into powerful terminal commands, providing a seamless bridge between human intent and machine execution.
+**Terminal on AI** is a specialized, local-first Windows CLI assistant designed for system administrators and power users. It leverages local LLMs (Large Language Models) to translate natural language into powerful terminal commands, providing a seamless bridge between human intent and machine execution.
 
 ![AI Shell Interface Mockup](https://via.placeholder.com/800x400?text=AI+Hollow+Shell+-+Premium+Windows+CLI+Experience)
 
