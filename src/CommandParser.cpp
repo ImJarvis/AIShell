@@ -1,37 +1,17 @@
 #include "CommandParser.h"
+#include "Logger.h"
 #include <algorithm>
 #include <vector>
 #include <cctype>
-#include <iostream>
-#include <fstream>
-#include <chrono>
-#include <iomanip>
+#include <sstream>
 
 ParsedCommand CommandParser::Parse(const std::string& input) 
 {
     ParsedCommand result;
     if (input.empty()) return result;
 
+    LOG_DEBUG("AI RAW RESPONSE:\n" + input);
     std::string fullResponse = input;
-
-    // Console Logging
-    std::cout << "\n[DEBUG] AI RAW RESPONSE:" << std::endl;
-    std::cout << "----------------------------------------" << std::endl;
-    std::cout << fullResponse << std::endl;
-    std::cout << "----------------------------------------" << std::endl;
-
-    // File Logging
-    std::ofstream logFile("ai_shell_log.txt", std::ios::app);
-    if (logFile.is_open()) {
-        auto now = std::chrono::system_clock::now();
-        std::time_t time_t_now = std::chrono::system_clock::to_time_t(now);
-        std::tm tm_now;
-        localtime_s(&tm_now, &time_t_now);
-        logFile << "\n=== [" << std::put_time(&tm_now, "%Y-%m-%d %H:%M:%S") << "] ===" << std::endl;
-        logFile << fullResponse << std::endl;
-        logFile.close();
-    }
-
 
     auto trim = [](std::string& s) {
         if (s.empty()) return;
@@ -43,14 +23,19 @@ ParsedCommand CommandParser::Parse(const std::string& input)
         size_t last = s.find_last_not_of(ignored);
         s = s.substr(first, (last - first + 1));
 
-        // 2. Scrub Windows prompts like "D:\> dir" or "C:\some\path> dir"
-        // Heuristic: If there's a '>' in the first 1/3 of the string, and it follows a colon or backslash
+        // 2. Scrub Comments
+        if (s.find('#') == 0) {
+            size_t nextLine = s.find('\n');
+            if (nextLine != std::string::npos) s.erase(0, nextLine + 1);
+        }
+
+        // 3. Improved Scrub Windows prompts
+        // We look for '>' anywhere in the first few segments to be safe
         size_t gt = s.find('>');
-        if (gt != std::string::npos && gt < (s.length() / 2) && gt > 1) {
+        if (gt != std::string::npos && gt < 60) { // Check up to 60 characters for path prefix
             std::string prefix = s.substr(0, gt);
             if (prefix.find(':') != std::string::npos || prefix.find('\\') != std::string::npos) {
                 s.erase(0, gt + 1);
-                // Final whitespace cleanup
                 size_t nextStart = s.find_first_not_of(" \t");
                 if (nextStart != std::string::npos) s.erase(0, nextStart);
                 else s.clear();

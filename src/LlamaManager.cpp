@@ -1,7 +1,10 @@
 #include "LlamaManager.h"
+#include "Logger.h"
+#include <iostream>
 #include <vector>
 
-LlamaManager::LlamaManager(const std::string& modelPath) {
+LlamaManager::LlamaManager(const std::string& modelPath, const std::string& modelName) 
+    : m_modelName(modelName) {
     llama_backend_init();
     auto m_params = llama_model_default_params();
     m_model = llama_load_model_from_file(modelPath.c_str(), m_params);
@@ -12,10 +15,42 @@ LlamaManager::LlamaManager(const std::string& modelPath) {
         m_ctx = llama_new_context_with_model(m_model, c_params);
     }
     m_n_predict = 256; 
+
+    // Default to TinyLlama template as it matches current usage
+    m_template = GetTinyLlamaTemplate();
+}
+
+ChatTemplate LlamaManager::GetTinyLlamaTemplate() {
+    return {
+        "<|system|>\n", "<|end|>\n",
+        "<|user|>\n", "<|end|>\n",
+        "<|assistant|>\n", "<|end|>\n"
+    };
+}
+
+ChatTemplate LlamaManager::GetPhi3Template() {
+    return {
+        "<|system|>\n", "<|end|>\n",
+        "<|user|>\n", "<|end|>\n",
+        "<|assistant|>\n", "<|end|>\n" // Phi-3 uses similar tags to ChatML often
+    };
+}
+
+ChatTemplate LlamaManager::GetQwenTemplate() {
+    return {
+        "<|im_start|>system\n", "<|im_end|>\n",
+        "<|im_start|>user\n", "<|im_end|>\n",
+        "<|im_start|>assistant\n", "<|im_end|>\n"
+    };
 }
 
 void LlamaManager::ResetContext() {
     m_historyTokens.clear();
+    if (m_ctx) {
+        // Updated API for new llama.cpp version: get memory and remove tokens for sequence 0
+        llama_memory_t mem = llama_get_memory(m_ctx);
+        llama_memory_seq_rm(mem, 0, -1, -1);
+    }
 }
 
 LlamaManager::~LlamaManager() {
@@ -29,37 +64,42 @@ std::string LlamaManager::GenerateCommand(const std::string& input, std::functio
 
     const struct llama_vocab* vocab = llama_model_get_vocab(m_model);
 
-    // 1. Format the new turn using ChatML (compatible with TinyLlama)
+    // 1. Format the new turn using the assigned template
     std::string turnMessage = "";
     
-    // Safety: Auto-reset if history is getting close to ctx limit (2048)
-    if (m_historyTokens.size() > 1600) {
-        ResetContext();
-    }
-
     if (m_historyTokens.empty()) {
-        turnMessage += "<|system|>\nYou are a Windows Systems Engineer. Convert user intent into valid structured JSON commands.\n"
-                       "SCHEMA:\n"
-                       "{\n  \"cmd\": \"The exact Windows command\",\n  \"why\": \"A brief safety or logic explanation\"\n}\n"
-                       "RULES:\n"
-                       "1. Use Windows CMD or PowerShell (e.g. Get-ChildItem). Prefer CMD for simple file tasks.\n"
-                       "2. NEVER hallucinate commands. Use 'wmic' (not 'wmi'), 'findstr' (not 'grep'), etc.\n"
-                       "3. Output ONLY the JSON object. No conversational filler, and NO shell prompts.\n"
-                       "4. NEVER output source code (Javascript, Node.js, C++, etc.). ONLY valid JSON.\n"
-                       "EXAMPLES:\n"
-                       "User: list files\nAssistant: {\"cmd\": \"dir\", \"why\": \"Lists all files and folders in the current directory.\"}\n"
-                       "User: check disk space\nAssistant: {\"cmd\": \"wmic logicaldisk get name\", \"why\": \"Queries Windows for drive names.\"}\n"
-                       "User: find 'error' in log.txt\nAssistant: {\"cmd\": \"findstr /i \\\"error\\\" log.txt\", \"why\": \"Searches for 'error' case-insensitively in log.txt.\"}\n"
-                       "<|end|>\n";
-    }
-    turnMessage += "<|user|>\n" + input + "<|end|>\n<|assistant|>\n";
+        // --- MASTER SYSTEM PROMPT (Applied to ALL models) ---
+        // This ensures consistent behavior and flat JSON schema across the app.
+        std::string masterPrompt = 
+            "You are a Windows CLI Expert. Your sole task is to convert user intent into a SINGLE Windows command.\n"
+            "CRITICAL RULES:\n"
+            "1. Output exactly one FLAT JSON object: {\"cmd\": \"...\", \"why\": \"...\"}\n"
+            "2. NEVER use arrays, nested objects, or multi-step keys (like step1, cmd1).\n"
+            "3. If multiple steps are needed, combine them into one line using '&&' (CMD) or ';' (PowerShell).\n"
+            "4. Prefer CMD for simple file tasks. Use PowerShell for complex system queries.\n"
+            "5. NO conversational filler. NO additional text outside the JSON.\n"
+            "6. Output ONLY valid, executable Windows commands.\n"
+            "EXAMPLES:\n"
+            "User: list files and then make folder test\n"
+            "Assistant: {\"cmd\": \"dir && mkdir test\", \"why\": \"Lists current files and then creates the 'test' directory.\"}\n";
 
-    // 2. Tokenize with BOS if first message
+        // Model-specific logic tweaks (if any) can be appended if necessary, 
+        // but the Master rules above overwrite them.
+        if (m_modelName.find("Phi") != std::string::npos) {
+            masterPrompt += "\nNote: As a Phi model, prioritize conciseness and avoid any preamble.";
+        }
+        
+        turnMessage += m_template.systemStart + masterPrompt + m_template.systemEnd;
+    }
+    
+    turnMessage += m_template.userStart + input + m_template.userEnd + m_template.assistantStart;
+
+    // Tokenize
     std::vector<llama_token> newTokens(turnMessage.length() + 8);
     int n_new = llama_tokenize(vocab, turnMessage.c_str(), (int)turnMessage.length(), newTokens.data(), (int)newTokens.size(), m_historyTokens.empty(), true);
     newTokens.resize(n_new);
 
-    // 3. Batch process new tokens
+    // Batch process new tokens
     llama_batch batch = llama_batch_init(2048, 0, 1);
     batch.n_tokens = n_new;
     for (int i = 0; i < n_new; i++) {
@@ -76,8 +116,9 @@ std::string LlamaManager::GenerateCommand(const std::string& input, std::functio
     }
 
     m_historyTokens.insert(m_historyTokens.end(), newTokens.begin(), newTokens.end());
+    LOG_INFO("Generating response for model: " + m_modelName);
 
-    // 4. Advanced Sampling Chain
+    // Sampling
     struct llama_sampler* sampler = llama_sampler_chain_init(llama_sampler_chain_default_params());
     llama_sampler_chain_add(sampler, llama_sampler_init_penalties(2048, 1.15f, 0.10f, 0.10f));
     llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
@@ -86,15 +127,12 @@ std::string LlamaManager::GenerateCommand(const std::string& input, std::functio
     llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
     std::string response = "";
-    std::vector<llama_token> generatedTokens;
-    
     llama_token lastToken = -1;
     int repeatCount = 0;
 
     for (int i = 0; i < m_n_predict; i++) {
         llama_token id = llama_sampler_sample(sampler, m_ctx, -1);
         
-        // Repetition Circuit Breaker
         if (id == lastToken) {
             repeatCount++;
             if (repeatCount >= 3) break; 
@@ -103,38 +141,31 @@ std::string LlamaManager::GenerateCommand(const std::string& input, std::functio
             lastToken = id;
         }
 
-        // Check for End of Generation or ChatML end tag
         if (llama_vocab_is_eog(vocab, id)) break;
 
         char buf[256];
         int n = llama_token_to_piece(vocab, id, buf, sizeof(buf), 0, true);
         if (n > 0) {
             std::string piece(buf, n);
-            // Don't include the assistant end tag in the visible response
+            // Check for template end tags in response
             if (piece.find("<|") != std::string::npos) break;
             response += piece;
             if (callback) callback(piece);
         }
 
-        generatedTokens.push_back(id);
-
+        m_historyTokens.push_back(id);
         batch.n_tokens = 1;
         batch.token[0] = id;
-        batch.pos[0] = (llama_pos)(m_historyTokens.size());
+        batch.pos[0] = (llama_pos)(m_historyTokens.size() - 1);
         batch.n_seq_id[0] = 1;
         batch.seq_id[0][0] = 0;
         batch.logits[0] = true;
 
         if (llama_decode(m_ctx, batch) != 0) break;
-        
-        // Safety: ensure we update the history size tracking locally
-        m_historyTokens.push_back(id);
     }
 
     llama_sampler_free(sampler);
     llama_batch_free(batch);
-
-    if (response.empty()) return "Error: AI returned empty response. Check model prompt compatibility.";
-
+    LOG_DEBUG("Model response complete: " + response);
     return response;
 }

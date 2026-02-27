@@ -108,7 +108,9 @@ public:
             }
             cmd = "powershell -NoProfile -Command \"" + escaped + "\" 2>&1";
         } else {
-            cmd = "(" + command + ") 2>&1"; 
+            // Using /C ensures the command is handled as a single unit by the shell
+            // and avoids parentheses issues with variables like %PATH%
+            cmd = "cmd /C \"" + command + "\" 2>&1"; 
         }
         
         FILE* pipe = _popen(cmd.c_str(), "r");

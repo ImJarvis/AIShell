@@ -1,26 +1,29 @@
 cmake_minimum_required(VERSION 3.12)
 project(AIHollowShell)
 
-# ---- TinyLlama GGUF model setup ----
+# ---- GGUF Model Download Automation ----
 set(MODEL_DIR "${CMAKE_SOURCE_DIR}/models")
-set(TINYLLAMA_GGUF "${MODEL_DIR}/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
-
 file(MAKE_DIRECTORY "${MODEL_DIR}")
 
-if (NOT EXISTS "${TINYLLAMA_GGUF}")
-    message(STATUS "Downloading TinyLlama GGUF model...")
+# 1. TinyLlama Setup (REMOVED)
+# set(TINYLLAMA_GGUF "${MODEL_DIR}/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
+# if (NOT EXISTS "${TINYLLAMA_GGUF}")
+#     message(STATUS "Downloading TinyLlama GGUF...")
+#     file(DOWNLOAD https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf "${TINYLLAMA_GGUF}" SHOW_PROGRESS)
+# endif()
 
-    file(DOWNLOAD
-        https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf
-        "${TINYLLAMA_GGUF}"
-        SHOW_PROGRESS
-        STATUS DOWNLOAD_STATUS
-    )
+# 2. Qwen Setup
+set(QWEN_GGUF "${MODEL_DIR}/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf")
+if (NOT EXISTS "${QWEN_GGUF}")
+    message(STATUS "Downloading Qwen 2.5 Coder 1.5B GGUF...")
+    file(DOWNLOAD https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf "${QWEN_GGUF}" SHOW_PROGRESS)
+endif()
 
-    list(GET DOWNLOAD_STATUS 0 DOWNLOAD_CODE)
-    if (NOT DOWNLOAD_CODE EQUAL 0)
-        message(FATAL_ERROR "Failed to download TinyLlama GGUF model")
-    endif()
+# 3. Phi-3.5 Setup
+set(PHI_GGUF "${MODEL_DIR}/phi-3.5-mini-instruct-q4_k_m.gguf")
+if (NOT EXISTS "${PHI_GGUF}")
+    message(STATUS "Downloading Phi-3.5 Mini GGUF...")
+    file(DOWNLOAD https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf "${PHI_GGUF}" SHOW_PROGRESS)
 endif()
 
 
@@ -113,8 +116,16 @@ add_custom_command(TARGET AIHollowShell POST_BUILD
         $<TARGET_RUNTIME_DLLS:AIHollowShell>
         $<TARGET_FILE_DIR:AIHollowShell>
 
+#    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+#        "${TINYLLAMA_GGUF}"
+#        $<TARGET_FILE_DIR:AIHollowShell>
+
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${TINYLLAMA_GGUF}"
+        "${QWEN_GGUF}"
+        $<TARGET_FILE_DIR:AIHollowShell>
+
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${PHI_GGUF}"
         $<TARGET_FILE_DIR:AIHollowShell>
 
     COMMAND_EXPAND_LISTS

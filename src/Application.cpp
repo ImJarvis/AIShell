@@ -1,14 +1,45 @@
 #include "Application.h"
 #include "ShellManager.h"
 #include "CommandParser.h"
+#include "LlamaManager.h"
 #include <future>
+
+// Custom handler to prevent Ctrl+C from crashing the app
+BOOL WINAPI ConsoleCtrlHandler(DWORD dwCtrlType) {
+    if (dwCtrlType == CTRL_C_EVENT || dwCtrlType == CTRL_BREAK_EVENT) {
+        return TRUE; // Swallow the event
+    }
+    return FALSE;
+}
 
 Application::Application()
 {
+    SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE);
+
     m_Window = std::make_unique<Window>(WIDTH, HEIGHT, "Hollow Shell");
     m_Input = std::make_unique<InputManager>(m_Window->GetWin32Handle());
     m_Gui = std::make_unique<GuiRenderer>(m_Window->GetNativeHandle());
-    m_Llama = std::make_unique<LlamaManager>("tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf");
+    
+    // Initialize with default
+    SwitchToModel(0);
+}
+
+void Application::SwitchToModel(int index) {
+    if (index < 0 || index >= m_ModelFiles.size()) return;
+    
+    m_SelectedModelIndex = index;
+    auto localAI = std::make_unique<LlamaManager>(m_ModelFiles[index], m_ModelOptions[index]);
+    
+    // Apply appropriate template
+    if (m_ModelOptions[index].find("Qwen") != std::string::npos) {
+        localAI->SetTemplate(LlamaManager::GetQwenTemplate());
+    } else if (m_ModelOptions[index].find("Phi") != std::string::npos) {
+        localAI->SetTemplate(LlamaManager::GetPhi3Template());
+    } else {
+        localAI->SetTemplate(LlamaManager::GetTinyLlamaTemplate());
+    }
+    
+    m_AI = std::move(localAI);
 }
 
 void Application::Run() {
@@ -77,13 +108,19 @@ void Application::Run() {
 
         m_Gui->BeginFrame();
 
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_Window->Hide();
+        }
+
         // UI Positioning: Using FirstUseEver so it can be moved/resized by user
         ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
 
-        // Styling
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.05f, 0.05f, 0.05f, 0.95f)); // More Opaque
+        // Premium Styling
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.02f, 0.02f, 0.04f, 0.92f)); 
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.0f, 0.8f, 1.0f, 0.3f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 12.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.5f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 6.0f);
 
         // Flags: Allow resizing
         ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse;
@@ -110,17 +147,42 @@ void Application::Run() {
             glfwSetWindowSize(m_Window->GetNativeHandle(), (int)currentSize.x, (int)currentSize.y);
         }
 
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.4f, 1.0f)); 
+        // Header with Glow
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 1.0f, 0.8f, 1.0f)); 
+        ImGui::Text(">> HOLLOW_SHELL_V1.2");
+        ImGui::PopStyleColor();
 
-        ImGui::Text(">> HOLLOW_SHELL_V1.1 :: STATUS: %s", m_IsThinking ? "ANALYZING..." : "READY");
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(ImGui::GetContentRegionAvail().x - 220);
+        
+        // Model Selector Dropdown
+        ImGui::PushItemWidth(200);
+        if (ImGui::BeginCombo("##ModelSelect", m_ModelOptions[m_SelectedModelIndex].c_str())) {
+            for (int i = 0; i < m_ModelOptions.size(); i++) {
+                bool isSelected = (m_SelectedModelIndex == i);
+                if (ImGui::Selectable(m_ModelOptions[i].c_str(), isSelected)) {
+                    SwitchToModel(i);
+                }
+                if (isSelected) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::PopItemWidth();
+
+        ImGui::Separator();
+
+        // Status Bar
+        ImVec4 statusColor = m_IsThinking ? ImVec4(1.0f, 0.6f, 0.0f, 1.0f) : ImVec4(0.0f, 1.0f, 0.4f, 1.0f);
+        ImGui::TextColored(statusColor, "STATUS: %s", m_IsThinking ? "ANALYZING..." : "READY");
+        
         ImGui::SameLine(ImGui::GetContentRegionAvail().x - 70);
         if (ImGui::SmallButton("RESET AI")) {
-            m_Llama->ResetContext();
+            m_AI->ResetContext();
             m_aiResponse = "AI Context Reset Done.";
             m_LastGeneratedCommand = "";
             m_CommandVerified = false;
         }
-        ImGui::Separator();
+        ImGui::Spacing();
 
         // 4. Output Log
         float reservedHeight = ImGui::GetFrameHeightWithSpacing() * 2.5f;
@@ -269,14 +331,14 @@ void Application::Run() {
 
         if (ImGui::InputText("##cmd", inputBuffer, IM_ARRAYSIZE(inputBuffer), ImGuiInputTextFlags_EnterReturnsTrue)) {
             std::string userInput(inputBuffer);
-            if (!userInput.empty() && m_Llama) {
+            if (!userInput.empty() && m_AI) {
                 m_IsThinking = true;
                 m_TerminalOutput = "";
                 m_LastGeneratedCommand = "";
                 m_aiResponse = ""; // Clear for streaming
 
                 m_AiThread = std::async(std::launch::async, [this, userInput]() {
-                    return m_Llama->GenerateCommand(userInput, [this](const std::string& token) {
+                    return m_AI->GenerateCommand(userInput, [this](const std::string& token) {
                         std::lock_guard<std::mutex> lock(m_ResponseMutex);
                         m_aiResponse += token;
                         m_ScrollToBottom = true;
@@ -290,8 +352,8 @@ void Application::Run() {
 
         if (isInputDisabled) ImGui::EndDisabled();
 
-        ImGui::PopStyleColor(2); // Text, WindowBg
-        ImGui::PopStyleVar(2);   // Rounding, BorderSize
+        ImGui::PopStyleColor(2); // WindowBg, Border
+        ImGui::PopStyleVar(3);   // Rounding, BorderSize, FrameRounding
         ImGui::End();
 
         m_Gui->EndFrame();

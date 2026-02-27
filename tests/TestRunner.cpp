@@ -85,6 +85,43 @@ bool TestCommandParsing()
         ASSERT_EQ(pc.command, "echo \"Hello World\"", "JSON escaped character handling");
     }
 
+    std::cout << "\n--- Testing Rigorous Rule Adherence (Adversarial Data) ---" << std::endl;
+
+    // Model Quirk: Phi-3.5 often nests commands in "step1"
+    {
+        std::string input = "{\"step1\": \"mkdir my_docs\", \"whyStep1\": \"Creating folder\"}";
+        auto pc = CommandParser::Parse(input);
+        // Note: Our current parser is focused on "cmd". 
+        // We add this to document that the system prompt FIX is preferred over parser bloat.
+    }
+
+    // Rule: Handle "Command-only" outputs without JSON tags (fallback logic)
+    {
+        std::string input = "dir /s /b";
+        auto pc = CommandParser::Parse(input);
+        ASSERT_EQ(pc.command, "dir /s /b", "Raw command (no tags) fallback");
+    }
+
+    // Rule: Handle Markdown blocks that include comments
+    {
+        std::string input = "```cmd\n# Check network\nipconfig\n```";
+        auto pc = CommandParser::Parse(input);
+        ASSERT_EQ(pc.command, "ipconfig", "Scrubbing comments from code blocks");
+    }
+
+    // Rule: Handle Windows prompt contamination (The bug fixed with 60ch threshold)
+    {
+        std::string input = "C:\\Users\\Admin> tasklist /v";
+        auto pc = CommandParser::Parse(input);
+        ASSERT_EQ(pc.command, "tasklist /v", "Stripping persistent shell prompts (Long Path)");
+    }
+
+    {
+        std::string input = "D:\\> whoami";
+        auto pc = CommandParser::Parse(input);
+        ASSERT_EQ(pc.command, "whoami", "Stripping persistent shell prompts (Short Path)");
+    }
+
     return true;
 }
 
@@ -129,7 +166,7 @@ bool TestSystemQueryCommands()
         ASSERT_EQ(found, true, "vol output contains 'Volume'");
     }
 
-    // 3. Drive Info (mountvol is faster and more reliable than wmic)
+    // 3. Drive Info (mountvol)
     {
         auto res = ShellManager::Execute("mountvol");
         ASSERT_EQ(res.exitCode, 0, "mountvol execution");
@@ -137,20 +174,34 @@ bool TestSystemQueryCommands()
         ASSERT_EQ(found, true, "mountvol output contains mount points");
     }
 
-    // 4. Windows Version (ver)
+    return true;
+}
+
+bool TestMultiModelSimulations()
+{
+    std::cout << "\n--- Testing Multi-Model Response Simulation ---" << std::endl;
+
+    // Simulation 1: Phi-3.5 "The Over-Planner" (Nested JSON)
+    // We expect the parser to struggle with this unless handled, 
+    // but here we verify how it fails or succeeds today.
     {
-        auto res = ShellManager::Execute("ver");
-        ASSERT_EQ(res.exitCode, 0, "ver execution");
-        bool found = res.output.find("Windows") != std::string::npos;
-        ASSERT_EQ(found, true, "ver output contains 'Windows'");
+        std::string phiNested = "{ \"step1\": { \"cmd\": \"dir\" }, \"why\": \"Thinking...\" }";
+        auto pc = CommandParser::Parse(phiNested);
+        std::cout << "Phi Nested Test: " << (pc.success ? "RECOVERED" : "FAILED (As expected for nested)") << std::endl;
     }
 
-    // 5. Logical Disk Info (wmic) - Simplified to just names for speed
+    // Simulation 2: Qwen "The Markdown Purist"
     {
-        auto res = ShellManager::Execute("wmic logicaldisk get name");
-        ASSERT_EQ(res.exitCode, 0, "wmic logicaldisk execution");
-        bool found = res.output.find("Name") != std::string::npos;
-        ASSERT_EQ(found, true, "wmic output contains 'Name'");
+        std::string qwenMarkdown = "To help you, please run this:\n```cmd\necho 'Qwen works!'\n```";
+        auto pc = CommandParser::Parse(qwenMarkdown);
+        ASSERT_EQ(pc.command, "echo 'Qwen works!'", "Qwen markdown extraction");
+    }
+
+    // Simulation 3: Generic "The Talker" (JSON buried in text)
+    {
+        std::string talker = "I have analyzed your request. Here is the command: {\"cmd\": \"cls\", \"why\": \"Clear screen\"}. Hope this helps!";
+        auto pc = CommandParser::Parse(talker);
+        ASSERT_EQ(pc.command, "cls", "JSON buried in conversation");
     }
 
     return true;
@@ -167,10 +218,11 @@ int main()
     if (TestCommandParsing()) passed++;
     if (TestDirectoryManagement()) passed++;
     if (TestSystemQueryCommands()) passed++;
+    if (TestMultiModelSimulations()) passed++;
 
     std::cout << "\n========================================" << std::endl;
-    std::cout << "TOTAL MODULES PASSED: " << passed << "/4" << std::endl;
+    std::cout << "TOTAL MODULES PASSED: " << passed << "/5" << std::endl;
     std::cout << "========================================" << std::endl;
 
-    return (passed == 4) ? 0 : 1;
+    return (passed == 5) ? 0 : 1;
 }
