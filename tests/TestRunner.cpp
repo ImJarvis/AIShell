@@ -177,6 +177,28 @@ bool TestSystemQueryCommands()
     return true;
 }
 
+bool TestShellDetectionLogic()
+{
+    std::cout << "\n--- Testing Shell Detection Logic (CMD vs PowerShell) ---" << std::endl;
+
+    // 1. Test CMD Logic (&& separator)
+    {
+        auto res = ShellManager::Execute("echo A && echo B");
+        ASSERT_EQ(res.exitCode, 0, "CMD '&&' logical operator support");
+        bool foundA = res.output.find("A") != std::string::npos;
+        bool foundB = res.output.find("B") != std::string::npos;
+        ASSERT_EQ(foundA && foundB, true, "CMD execution of combined commands");
+    }
+
+    // 2. Test PowerShell Cmdlet Detection
+    {
+        auto res = ShellManager::Execute("Get-Date");
+        ASSERT_EQ(res.exitCode, 0, "PowerShell Get-Date execution");
+    }
+
+    return true;
+}
+
 bool TestMultiModelSimulations()
 {
     std::cout << "\n--- Testing Multi-Model Response Simulation ---" << std::endl;
@@ -218,11 +240,12 @@ int main()
     if (TestCommandParsing()) passed++;
     if (TestDirectoryManagement()) passed++;
     if (TestSystemQueryCommands()) passed++;
+    if (TestShellDetectionLogic()) passed++;
     if (TestMultiModelSimulations()) passed++;
 
     std::cout << "\n========================================" << std::endl;
-    std::cout << "TOTAL MODULES PASSED: " << passed << "/5" << std::endl;
+    std::cout << "TOTAL MODULES PASSED: " << passed << "/6" << std::endl;
     std::cout << "========================================" << std::endl;
 
-    return (passed == 5) ? 0 : 1;
+    return (passed == 6) ? 0 : 1;
 }

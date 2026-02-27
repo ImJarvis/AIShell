@@ -74,9 +74,22 @@ public:
             }
 
             if (!found) {
-                // Check if it's a valid executable in PATH
-                std::string check = "where " + baseCmd + " >nul 2>nul";
-                if (system(check.c_str()) != 0) return false; // Fail immediately if any segment is invalid
+                // Security Fix: Avoid system("where ...") which is vulnerable to injection.
+                // We use a manual check for common executable extensions if not provided.
+                std::vector<std::string> extensions = { "", ".exe", ".com", ".bat", ".cmd" };
+                bool pathFound = false;
+                
+                for (const auto& ext : extensions) {
+                    char fullPath[MAX_PATH];
+                    char* filePart;
+                    std::string checkCmd = baseCmd + ext;
+                    if (SearchPathA(NULL, checkCmd.c_str(), NULL, MAX_PATH, fullPath, &filePart) > 0) {
+                        pathFound = true;
+                        break;
+                    }
+                }
+
+                if (!pathFound) return false; // Fail if not builtin and not found in PATH
             }
         }
 
@@ -84,49 +97,109 @@ public:
     }
 
     // Executes a command and captures its output
-    static ExecuteResult Execute(const std::string& command, std::function<void(const std::string&)> callback = nullptr) {
+    static ExecuteResult Execute(const std::string& command, std::atomic<bool>* stopSignal = nullptr, std::function<void(const std::string&)> callback = nullptr) {
         ExecuteResult result;
         result.exitCode = -1;
-
         if (command.empty()) return result;
 
-        // Use _popen to capture output. 
-        // Heuristic: If it has common PS markers or hyphenated cmdlets, use powershell
-        std::string cmd;
-        bool isPowerShell = (command.find("-Item") != std::string::npos || 
-                             command.find(" -") != std::string::npos || 
-                             command.find("Get-") == 0 ||
-                             command.find("Set-") == 0);
+        std::string fullCmdLine;
+        // Smarter shell detection
+        size_t firstHyphen = command.find("-");
+        size_t firstSpace = command.find(" ");
+        
+        bool hasCmdlet = (firstHyphen != std::string::npos && (firstSpace == std::string::npos || firstHyphen < firstSpace));
+        bool hasPsVar = (command.find("$") != std::string::npos);
+        bool hasCmdLogic = (command.find("&&") != std::string::npos || command.find("||") != std::string::npos);
+
+        // Heuristic: If it has &&, it MUST be CMD (PS 5.1 doesn't support it).
+        // Otherwise, look for Get-Item, Set-Content, etc.
+        bool isPowerShell = !hasCmdLogic && (hasCmdlet || hasPsVar);
 
         if (isPowerShell) {
-            // Escape double quotes for PowerShell if they exist
-            std::string escaped = command;
-            size_t pos = 0;
-            while ((pos = escaped.find("\"", pos)) != std::string::npos) {
-                escaped.insert(pos, "`");
-                pos += 2;
+            std::string escaped = "";
+            for(char c : command) {
+                if (c == '"') escaped += "`\"";
+                else escaped += c;
             }
-            cmd = "powershell -NoProfile -Command \"" + escaped + "\" 2>&1";
+            fullCmdLine = "powershell -NoProfile -ExecutionPolicy Bypass -Command \"" + escaped + "\"";
         } else {
-            // Using /C ensures the command is handled as a single unit by the shell
-            // and avoids parentheses issues with variables like %PATH%
-            cmd = "cmd /C \"" + command + "\" 2>&1"; 
+            fullCmdLine = "cmd /C \"" + command + "\""; 
         }
-        
-        FILE* pipe = _popen(cmd.c_str(), "r");
-        if (!pipe) {
-            result.output = "Error: Failed to open pipe for execution.";
+
+        // Win32 pipe setup
+        HANDLE hRead, hWrite;
+        SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+        if (!CreatePipe(&hRead, &hWrite, &sa, 0)) return result;
+        SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+
+        STARTUPINFOA si = { sizeof(STARTUPINFOA) };
+        si.cb = sizeof(STARTUPINFOA);
+        si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.hStdOutput = hWrite;
+        si.hStdError = hWrite;
+        si.wShowWindow = SW_HIDE;
+
+        PROCESS_INFORMATION pi = { 0 };
+        // CreateProcessA requires a non-const buffer for lpCommandLine
+        std::vector<char> cmdBuffer(fullCmdLine.begin(), fullCmdLine.end());
+        cmdBuffer.push_back('\0');
+
+        if (!CreateProcessA(NULL, cmdBuffer.data(), NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+            DWORD err = GetLastError();
+            std::string errMsg = "Error: Failed to launch process (Error Code: " + std::to_string(err) + ").\n" +
+                                 "Command: " + fullCmdLine + "\n" +
+                                 "Check if the executable exists and is in your PATH.";
+            CloseHandle(hRead);
+            CloseHandle(hWrite);
+            result.output = errMsg;
+            if (callback) callback(errMsg); 
             return result;
         }
 
-        std::array<char, 128> buffer;
-        while (fgets(buffer.data(), (int)buffer.size(), pipe) != nullptr) {
-            std::string fragment = buffer.data();
-            result.output += fragment;
-            if (callback) callback(fragment);
+        CloseHandle(hWrite); // Close writer in parent else read hangs
+
+        char buffer[1024];
+        DWORD bytesRead;
+        while (true) {
+            // Check for stop switch
+            if (stopSignal && stopSignal->load()) {
+                TerminateProcess(pi.hProcess, 1);
+                result.output += "\n[PROCESS TERMINATED BY USER]\n";
+                if (callback) callback("\n[TERMINATED]");
+                break;
+            }
+
+            // Check if there is data in pipe
+            DWORD avail = 0;
+            if (PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+                if (ReadFile(hRead, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
+                    buffer[bytesRead] = '\0';
+                    std::string frag(buffer);
+                    result.output += frag;
+                    if (callback) callback(frag);
+                }
+            } else {
+                // Check if process still running
+                DWORD waitRes = WaitForSingleObject(pi.hProcess, 50);
+                if (waitRes != WAIT_TIMEOUT) {
+                    // One last read attempt for leftover data
+                    while (PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+                        if (ReadFile(hRead, buffer, sizeof(buffer) - 1, &bytesRead, NULL) && bytesRead > 0) {
+                            buffer[bytesRead] = '\0';
+                            std::string frag(buffer);
+                            result.output += frag;
+                            if (callback) callback(frag);
+                        } else break;
+                    }
+                    GetExitCodeProcess(pi.hProcess, (LPDWORD)&result.exitCode);
+                    break;
+                }
+            }
         }
 
-        result.exitCode = _pclose(pipe);
+        CloseHandle(hRead);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
         return result;
     }
 };

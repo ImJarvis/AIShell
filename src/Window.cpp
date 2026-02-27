@@ -3,9 +3,9 @@
 Window::Window(int width, int height, const char* title) {
     glfwInit();
     
-    // Resizable & Opaque Setup
-    glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-    glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
+    // Standard Window Setup
+    glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+    glfwWindowHint(GLFW_FLOATING, GLFW_FALSE);
     glfwWindowHint(GLFW_TRANSPARENT_FRAMEBUFFER, GLFW_FALSE);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); // Start hidden

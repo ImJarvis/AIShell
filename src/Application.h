@@ -12,6 +12,7 @@
 class Application {
 public:
     Application();
+    virtual ~Application();
     void Run();
 
 private:
@@ -22,10 +23,10 @@ private:
     
     // Model Selection
     int m_SelectedModelIndex = 0;
-    const std::vector<std::string> m_ModelOptions = { "Phi-3.5 Mini 3.8B", "Qwen 2.5 Coder 1.5B" };
+    const std::vector<std::string> m_ModelOptions = { "Qwen 2.5 Coder 1.5B", "Phi-3.5 Mini 3.8B" };
     const std::vector<std::string> m_ModelFiles = { 
-        "phi-3.5-mini-instruct-q4_k_m.gguf",
-        "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf"
+        "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+        "phi-3.5-mini-instruct-q4_k_m.gguf"
     };
 
     void SwitchToModel(int index);
@@ -34,13 +35,16 @@ private:
     const int HEIGHT = 400;
 
     // AI & Execution State
+    std::future<void> m_ModelLoadThread;
     std::future<std::string> m_AiThread; 
     std::future<ShellManager::ExecuteResult> m_ExecThread;
-    bool m_IsThinking = false;           
-    bool m_IsExecuting = false;
+    std::atomic<bool> m_IsThinking = false;           
+    std::atomic<bool> m_IsExecuting = false;
+    std::atomic<bool> m_IsLoadingModel = false;
+    std::atomic<bool> m_StopExecution = { false };
     std::mutex m_ResponseMutex;
     
-    std::string m_aiResponse = "Hollow Shell initialized. Ready.";
+    std::string m_aiResponse = "PowerShell on AI initialized. Ready.";
     std::string m_CommandExplanation = "";
     std::string m_LastGeneratedCommand = "";
     std::string m_TerminalOutput = "";

@@ -7,12 +7,12 @@ LlamaManager::LlamaManager(const std::string& modelPath, const std::string& mode
     : m_modelName(modelName) {
     llama_backend_init();
     auto m_params = llama_model_default_params();
-    m_model = llama_load_model_from_file(modelPath.c_str(), m_params);
+    m_model = llama_model_load_from_file(modelPath.c_str(), m_params);
     
     if (m_model) {
         auto c_params = llama_context_default_params();
         c_params.n_ctx = 2048;
-        m_ctx = llama_new_context_with_model(m_model, c_params);
+        m_ctx = llama_init_from_model(m_model, c_params);
     }
     m_n_predict = 256; 
 
@@ -55,7 +55,7 @@ void LlamaManager::ResetContext() {
 
 LlamaManager::~LlamaManager() {
     if (m_ctx) llama_free(m_ctx);
-    if (m_model) llama_free_model(m_model);
+    if (m_model) llama_model_free(m_model);
     llama_backend_free();
 }
 
@@ -71,17 +71,19 @@ std::string LlamaManager::GenerateCommand(const std::string& input, std::functio
         // --- MASTER SYSTEM PROMPT (Applied to ALL models) ---
         // This ensures consistent behavior and flat JSON schema across the app.
         std::string masterPrompt = 
-            "You are a Windows CLI Expert. Your sole task is to convert user intent into a SINGLE Windows command.\n"
+            "You are a specialized Windows CLI AI Assistant. Your ONLY purpose is to assist with Windows command-line operations, system administration, and automation.\n"
             "CRITICAL RULES:\n"
             "1. Output exactly one FLAT JSON object: {\"cmd\": \"...\", \"why\": \"...\"}\n"
-            "2. NEVER use arrays, nested objects, or multi-step keys (like step1, cmd1).\n"
-            "3. If multiple steps are needed, combine them into one line using '&&' (CMD) or ';' (PowerShell).\n"
-            "4. Prefer CMD for simple file tasks. Use PowerShell for complex system queries.\n"
-            "5. NO conversational filler. NO additional text outside the JSON.\n"
-            "6. Output ONLY valid, executable Windows commands.\n"
+            "4. Combine multi-step tasks using '&&' for CMD operations and ';' for PowerShell operations.\n"
+            "5. If a command uses common Win32 flags (like netstat -an), keep it in CMD format using '&&'.\n"
+            "6. NO conversational filler. NO text outside the JSON.\n"
+            "7. IF THE USER ASKS ANYTHING UNRELATED to Windows commands, PowerShell, or CLI tasks (e.g., cooking, creative writing, general advice), YOU MUST DENY IT.\n"
+            "8. In case of a denial, use: {\"cmd\": \"DENIED\", \"why\": \"I am a specialized assistant for Windows CLI tasks only. I cannot assist with that request.\"}\n"
             "EXAMPLES:\n"
-            "User: list files and then make folder test\n"
-            "Assistant: {\"cmd\": \"dir && mkdir test\", \"why\": \"Lists current files and then creates the 'test' directory.\"}\n";
+            "User: show my ip and active ports\n"
+            "Assistant: {\"cmd\": \"ipconfig && netstat -an\", \"why\": \"Lists IP configuration and active network connections using CMD logic.\"}\n"
+            "User: check windows version and list services\n"
+            "Assistant: {\"cmd\": \"ver; Get-Service\", \"why\": \"Shows OS version and lists running services using PowerShell logic.\"}\n";
 
         // Model-specific logic tweaks (if any) can be appended if necessary, 
         // but the Master rules above overwrite them.
