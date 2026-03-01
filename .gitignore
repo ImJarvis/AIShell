@@ -14,3 +14,4 @@ models/
 # Executables
 *.exe
 *.bin
+/.cache/clangd/index

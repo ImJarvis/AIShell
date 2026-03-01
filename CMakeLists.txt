@@ -71,7 +71,6 @@ add_executable(AIHollowShell
     ${APP_SOURCES} 
     ${IMGUI_SOURCES}
     ${COMMON_HELPER_SRCS}
-    "src/CommandParser.cpp"
 )
 
 # 6b. Create Test Executable

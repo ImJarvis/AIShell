@@ -15,14 +15,20 @@ public:
         std::string output;
     };
 
-    // Checks if every command in a (potentially piped) string exists
-    static bool ValidateCommand(std::string& fullCommand) {
-        if (fullCommand.empty()) return false;
-        
-        // 0. Safety: De-wrap AI hallucinations like "[CMD] "dir" [WHY]"
+    struct RiskAssessment {
+        bool isValid = false;
+        int riskScore = 0; // 0-10
+        std::string riskReason = "";
+    };
+
+    // Scans command for high-risk patterns
+    static RiskAssessment AssessCommand(std::string& fullCommand) {
+        RiskAssessment assessment;
+        if (fullCommand.empty()) return assessment;
+
+        // 0. De-wrap AI hallucinations
         auto trimQuotes = [](std::string& s) {
             if (s.length() >= 2 && s.front() == '\"' && s.back() == '\"') {
-                // Only de-wrap if there aren't OTHER quotes inside (which would mean the outer ones are likely valid)
                 if (s.find('\"', 1) == s.length() - 1) {
                     s = s.substr(1, s.length() - 2);
                 }
@@ -30,70 +36,86 @@ public:
         };
         trimQuotes(fullCommand);
 
-        // 1. Split by pipes to validate the whole chain
+        // 1. Split by ALL separators: |, &, &&, ||, ;
         std::vector<std::string> segments;
-        std::stringstream ss(fullCommand);
-        std::string segment;
-        while (std::getline(ss, segment, '|')) {
-            segments.push_back(segment);
+        std::string currentSegment;
+        
+        for (size_t i = 0; i < fullCommand.length(); ++i) {
+            char c = fullCommand[i];
+            bool isSeparator = false;
+            
+            if (c == '|' || c == ';') isSeparator = true;
+            else if (c == '&' && i + 1 < fullCommand.length() && fullCommand[i+1] == '&') { isSeparator = true; i++; }
+            else if (c == '&') isSeparator = true;
+            else if (c == '|' && i + 1 < fullCommand.length() && fullCommand[i+1] == '|') { isSeparator = true; i++; }
+
+            if (isSeparator) {
+                if (!currentSegment.empty()) segments.push_back(currentSegment);
+                currentSegment.clear();
+            } else {
+                currentSegment += c;
+            }
         }
+        if (!currentSegment.empty()) segments.push_back(currentSegment);
+
+        assessment.isValid = true; // Assume true until check fails
 
         for (auto& seg : segments) {
-            // Trim leading spaces for each segment
             seg.erase(0, seg.find_first_not_of(" \t"));
             if (seg.empty()) continue;
 
+            // --- RISK SCANNING ---
+            std::string lowerSeg = seg;
+            for(auto &c : lowerSeg) c = (char)tolower(c);
+            
+            if (lowerSeg.find("/s") != std::string::npos || lowerSeg.find("-recurse") != std::string::npos) {
+                assessment.riskScore += 3;
+                assessment.riskReason += "[RECURSIVE OPERATION] ";
+            }
+            if (lowerSeg.find("/f") != std::string::npos || lowerSeg.find("-force") != std::string::npos || lowerSeg.find("/q") != std::string::npos) {
+                assessment.riskScore += 2;
+                assessment.riskReason += "[FORCED/QUIET ACTION] ";
+            }
+            if (lowerSeg.find("del") != std::string::npos || lowerSeg.find("rmdir") != std::string::npos || lowerSeg.find("rd") != std::string::npos || lowerSeg.find("remove-") != std::string::npos) {
+                assessment.riskScore += 4;
+                assessment.riskReason += "[DELETION DETECTED] ";
+            }
+
+            // --- VALIDITY CHECK ---
             std::stringstream segSS(seg);
             std::string baseCmd;
             segSS >> baseCmd;
-
-            if (baseCmd.empty()) continue;
-
-            // Handle quoted paths in segments
             if (baseCmd.front() == '\"') {
                 size_t secondQuote = seg.find('\"', 1);
-                if (secondQuote != std::string::npos) {
-                    baseCmd = seg.substr(1, secondQuote - 1);
-                }
+                if (secondQuote != std::string::npos) baseCmd = seg.substr(1, secondQuote - 1);
             }
 
             bool found = false;
-
-            // Whitelist of internal CMD built-ins
             static const std::vector<std::string> builtins = { 
                 "dir", "copy", "del", "echo", "mkdir", "md", "rmdir", "rd", 
                 "move", "ren", "type", "cls", "cd", "pushd", "popd", "ver", "vol",
-                "xcopy", "robocopy", "where", "set", "path", "findstr", "find", "sort", "wmic"
+                "xcopy", "robocopy", "where", "set", "path", "findstr", "find", "sort", "wmic", "powershell", "pwsh"
             };
             
             for (const auto& b : builtins) {
-                if (_stricmp(baseCmd.c_str(), b.c_str()) == 0) {
-                    found = true;
-                    break;
-                }
+                if (_stricmp(baseCmd.c_str(), b.c_str()) == 0) { found = true; break; }
             }
 
             if (!found) {
-                // Security Fix: Avoid system("where ...") which is vulnerable to injection.
-                // We use a manual check for common executable extensions if not provided.
                 std::vector<std::string> extensions = { "", ".exe", ".com", ".bat", ".cmd" };
                 bool pathFound = false;
-                
                 for (const auto& ext : extensions) {
-                    char fullPath[MAX_PATH];
-                    char* filePart;
+                    char fullPath[MAX_PATH]; char* filePart;
                     std::string checkCmd = baseCmd + ext;
                     if (SearchPathA(NULL, checkCmd.c_str(), NULL, MAX_PATH, fullPath, &filePart) > 0) {
-                        pathFound = true;
-                        break;
+                        pathFound = true; break;
                     }
                 }
-
-                if (!pathFound) return false; // Fail if not builtin and not found in PATH
+                if (!pathFound) { assessment.isValid = false; break; }
             }
         }
 
-        return true;
+        return assessment;
     }
 
     // Executes a command and captures its output

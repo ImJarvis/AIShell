@@ -1,69 +1,46 @@
-# Terminal on AI 🐚
+# cmdAI
 
-**Terminal on AI** is a specialized, local-first Windows CLI assistant designed for system administrators and power users. It leverages local LLMs (Large Language Models) to translate natural language into powerful terminal commands, providing a seamless bridge between human intent and machine execution.
+A local-first Windows CLI orchestrator that translates natural language into terminal commands using local LLMs.
 
-![AI Shell Interface Mockup](https://via.placeholder.com/800x400?text=Terminal+on+AI+-+Premium+Windows+CLI+Experience)
+## Features
 
-## 🚀 Key Features
+- **Local Inference**: Powered by `llama.cpp` for GGUF models (Qwen 2.5, Phi-3.5).
+- **Security**: Built-in command firewall to prevent malicious execution.
+- **Smart Shell**: Automatically detects and routes between CMD and PowerShell.
+- **Modern UI**: Clean, responsive ImGui interface with real-time process control.
+- **Global Access**: Instant show/hide via system-wide hotkey.
 
-- **Local LLM Execution**: Powered by `llama.cpp`, supporting GGUF models like Qwen 2.5 and Phi-3.5 without needing cloud APIs.
-- **Intelligent Shell Selection**: Automatically detects whether a command should run in **CMD** or **PowerShell** based on syntax (Cmdlets, operators like `&&`, etc.).
-- **Specialized AI Persona**: A domain-locked assistant strictly focused on Windows administration, automation, and CLI tasks.
-- **Robust Process Control**: Featuring a **Kill Switch** (STOP button) to safely terminate long-running or runaway commands instantly.
-- **Premium UI/UX**: A state-of-the-art ImGui interface with:
-  - **Centered "Heartbeat" Status**: Real-time visibility of system states (Thinking, Loading, Ready).
-  - **Asynchronous Workflow**: Non-blocking model loading and command execution.
-  - **Safety First**: Visual verification indicators for suggested commands.
-- **Anti-Hallucination Guardrails**: Specialized parsing logic that strips internal AI noise and strictly enforces flat JSON schemas.
+## Prerequisites
 
-## 🛠️ Technology Stack
-
-- **Core**: C++ 17/20
-- **Graphics & UI**: ImGui, GLFW, OpenGL
-- **AI Inference**: llama.cpp (Local GGUF loading)
-- **OS Integration**: Win32 API for process management and pipe redirection
-
-## 📂 Project Structure
-
-- `src/`: Core application logic, window management, and UI rendering.
-- `llama.cpp/`: Submodule for model inference.
-- `tests/`: Module-based test suite for parsing and shell execution.
-- `models/`: (Recommended) Directory for storing your `.gguf` model files.
-
-## 🏁 Getting Started
-
-### Prerequisites
-- Visual Studio 2022 (with C++ development workload)
-- CMake
+- Visual Studio 2022 (C++ workload)
+- CMake 3.20+
 - Git
 
-### Installation
-1.  **Clone the Repository**:
-    ```bash
-    git clone https://github.com/YourUsername/AIHollowShell.git
-    cd AIHollowShell
-    git submodule update --init --recursive
-    ```
-2.  **Build the Project**:
-    ```bash
-    mkdir build
-    cd build
-    cmake ..
-    cmake --build . --config Release
-    ```
-    *Note: The CMake build system will automatically download the necessary GGUF models (Qwen 2.5 and Phi-3.5) from Hugging Face if they are not already present in your `/models` folder.*
+## Installation & Build
 
-## 📖 Usage
+1. **Clone**:
+   ```bash
+   git clone https://github.com/YourUsername/cmdAI.git
+   cd cmdAI
+   git submodule update --init --recursive
+   ```
 
-1.  **Launch**: Run `AIHollowShell.exe`.
-2.  **Select Model**: Use the dropdown in the header to switch between available LLMs.
-3.  **Type Intent**: Enter a natural language request like *"Show my IP and list active network results"*.
-4.  **Execute**: Review the generated command and click **RUN COMMAND** or press Enter.
-5.  **Control**: Use the blinking **STOP !!** button in the terminal header to kill a task if it takes too long.
+2. **Build**:
+   ```bash
+   mkdir build && cd build
+   cmake ..
+   cmake --build . --config Release
+   ```
+   *Note: Models will be downloaded automatically on the first run.*
 
-## 🛡️ License
+## Usage
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+- **Summon**: Press `ALT + I` to show/hide the app.
+- **Prompt**: Type your intent in the bottom command bar (e.g., "list large files").
+- **Execute**: Press `Enter` or click the `>` button to run the generated command.
+- **Stop**: Use the pulsng `Stop` button to terminate running processes.
+- **Reset**: Click `Reset` in the top-right to clear session context.
 
----
-*Built with passion for the Windows terminal ecosystem.*
+## License
+
+This project is licensed under the MIT License.
