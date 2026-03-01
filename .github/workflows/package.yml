@@ -1,0 +1,55 @@
+name: Build and Package Portable Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger on version tags like v1.0.0
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=Release
+
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config Release --target AIHollowShell
+
+    - name: Prepare Distribution
+      shell: pwsh
+      run: |
+        New-Item -ItemType Directory -Path dist
+        Copy-Item "build/Release/AIHollowShell.exe" -Destination "dist/cmdAI.exe"
+        
+        # Copy DLLs
+        Get-ChildItem "build/Release/*.dll" | Copy-Item -Destination "dist/"
+        
+        # Create a README for the ZIP
+        "Terminal Co-Pilot (cmdAI) Portable Release`n`nTo run: Double-click cmdAI.exe`nHotkey: ALT + I" | Out-File -FilePath "dist/README.txt"
+
+    - name: Create ZIP
+      shell: pwsh
+      run: Compress-Archive -Path dist/* -DestinationPath cmdAI-Portable-Windows.zip
+
+    - name: Upload Release Artifact
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: cmdAI-Portable-Windows.zip
+        body: |
+          🚀 Terminal Co-Pilot Portable Release
+          
+          ### 📦 Installation
+          1. Download the ZIP below.
+          2. Extract to a folder.
+          3. Run `cmdAI.exe`.
+          
+          Note: This version does not include a model by default to keep the download small. The app will prompt you to download a model on first run, or you can place a .gguf in the `models/` folder.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
