@@ -1,6 +1,6 @@
-# cmdAI
+# Terminal Co-Pilot
 
-A local-first Windows CLI orchestrator that translates natural language into terminal commands using local LLMs.
+A local-first Windows CLI orchestrator (cmdAI) that translates natural language into terminal commands using local LLMs.
 
 ## Features
 
