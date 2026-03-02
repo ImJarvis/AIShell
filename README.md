@@ -26,7 +26,7 @@ A local-first Windows CLI orchestrator that translates natural language into ter
 ## 🚀 Try it Now (No Setup)
 
 Don't want to build from source? 
-1. Go to the **[Releases](https://github.com/YourUsername/cmdAI/releases)** page.
+1. Go to the **[Releases]((https://github.com/ImJarvis/AIShell/releases))** page.
 2. Download the latest `Terminal Co-Pilot.zip`.
 3. Extract and run `cmdAI.exe`.
 
