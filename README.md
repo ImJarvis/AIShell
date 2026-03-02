@@ -4,6 +4,15 @@ A local-first Windows CLI orchestrator that translates natural language into ter
 
 ---
 
+## 📸 Showcase
+
+| Main Dashboard | Real-time Process Control |
+| :---: | :---: |
+| ![Dashboard Screenshot](screenshots/dashboard.png) | ![Process Control Screenshot](screenshots/process_control.png) |
+
+---
+
+
 ## ✨ Features
 
 - **🌐 Local Inference**: Powered by `llama.cpp` for GGUF models (Qwen 2.5, Phi-3.5).
@@ -51,7 +60,7 @@ Don't want to build from source?
 ## 🎮 Usage
 
 - **🔔 Summon**: Press `ALT + I` to show/hide the app.
-- **💬 Prompt**: Type your intent in the bottom command bar (e.g., "list large files").
+- **💬 Prompt**: Type your intent in the bottom command bar (e.g., "show me systme info or list large files").
 - **▶️ Execute**: Press `Enter` or click the `>` button to run the generated command.
 - **⏹️ Stop**: Use the pulsing `Stop` button to terminate running processes.
 - **🧹 Reset**: Click `Reset` in the top-right to clear session context.
