@@ -8,7 +8,7 @@ A local-first Windows CLI orchestrator that translates natural language into ter
 
 | Main Dashboard | Real-time Process  |
 | :---: | :---: |
-| ![Dashboard Screenshot](screenshots/dashboard.jpg) | ![Process Control Screenshot](screenshots/2.png) |
+| ![Dashboard Screenshot](screenshots/dashboard.JPG) | ![Process Control Screenshot](screenshots/2.PNG) |
 
 ---
 
