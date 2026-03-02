@@ -6,9 +6,9 @@ A local-first Windows CLI orchestrator that translates natural language into ter
 
 ## 📸 Showcase
 
-| Main Dashboard | Real-time Process Control |
+| Main Dashboard | Real-time Process  |
 | :---: | :---: |
-| ![Dashboard Screenshot](screenshots/dashboard.png) | ![Process Control Screenshot](screenshots/process_control.png) |
+| ![Dashboard Screenshot](screenshots/dashboard.jpg) | ![Process Control Screenshot](screenshots/2.png) |
 
 ---
 
