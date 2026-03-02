@@ -15,3 +15,7 @@ models/
 *.exe
 *.bin
 /.cache/clangd/index
+/logs
+/build_output.txt
+/test_output.txt
+/test_output_utf8.txt
