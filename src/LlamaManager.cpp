@@ -8,6 +8,7 @@ LlamaManager::LlamaManager(const std::string &modelPath,
     : m_modelName(modelName) {
   llama_backend_init();
   auto m_params = llama_model_default_params();
+  m_params.n_gpu_layers = 99; // Enable GPU acceleration (offload all layers)
   m_model = llama_model_load_from_file(modelPath.c_str(), m_params);
 
   if (m_model) {
@@ -37,6 +38,10 @@ ChatTemplate LlamaManager::GetQwenTemplate() {
   return {"<|im_start|>system\n",    "<|im_end|>\n",
           "<|im_start|>user\n",      "<|im_end|>\n",
           "<|im_start|>assistant\n", "<|im_end|>\n"};
+}
+
+ChatTemplate LlamaManager::GetDeepSeekTemplate() {
+  return {"", "\n", "### Instruction:\n", "\n", "### Response:\n", ""};
 }
 
 void LlamaManager::ResetContext() {
@@ -101,7 +106,18 @@ std::string LlamaManager::GenerateCommand(
     turnMessage += m_template.systemStart + masterPrompt + m_template.systemEnd;
   }
 
-  turnMessage += m_template.userStart + input + m_template.userEnd +
+  // SECURITY OPTIMIZATION: Sanitize template tokens to prevent prompt injection
+  std::string sanitizedInput = input;
+  std::vector<std::string> templateTags = {"<|",         "im_start", "im_end",
+                                           "assistant|", "user|",    "system|"};
+  for (const auto &tag : templateTags) {
+    size_t pos = 0;
+    while ((pos = sanitizedInput.find(tag, pos)) != std::string::npos) {
+      sanitizedInput.erase(pos, tag.length());
+    }
+  }
+
+  turnMessage += m_template.userStart + sanitizedInput + m_template.userEnd +
                  m_template.assistantStart;
 
   // Tokenize
