@@ -6,7 +6,6 @@
 #include <string>
 #include <vector>
 
-
 struct ChatTemplate {
   std::string systemStart;
   std::string systemEnd;
@@ -36,7 +35,6 @@ public:
   static ChatTemplate GetTinyLlamaTemplate();
   static ChatTemplate GetPhi3Template();
   static ChatTemplate GetQwenTemplate();
-  static ChatTemplate GetDeepSeekTemplate();
 
 private:
   llama_model *m_model = nullptr;

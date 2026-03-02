@@ -59,8 +59,6 @@ void Application::SwitchToModel(int index) {
       localAI->SetTemplate(LlamaManager::GetQwenTemplate());
     } else if (m_ModelOptions[index].find("Phi") != std::string::npos) {
       localAI->SetTemplate(LlamaManager::GetPhi3Template());
-    } else if (m_ModelOptions[index].find("DeepSeek") != std::string::npos) {
-      localAI->SetTemplate(LlamaManager::GetDeepSeekTemplate());
     } else {
       localAI->SetTemplate(LlamaManager::GetTinyLlamaTemplate());
     }

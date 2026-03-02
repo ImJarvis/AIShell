@@ -1,5 +1,6 @@
 #include "LlamaManager.h"
 #include "Logger.h"
+#include "ggml-backend.h"
 #include <iostream>
 #include <vector>
 
@@ -7,8 +8,43 @@ LlamaManager::LlamaManager(const std::string &modelPath,
                            const std::string &modelName)
     : m_modelName(modelName) {
   llama_backend_init();
+  ggml_backend_load_all(); // Ensure all backends are visible
+
   auto m_params = llama_model_default_params();
-  m_params.n_gpu_layers = 99; // Enable GPU acceleration (offload all layers)
+  m_params.n_gpu_layers = 0; // Default: disable GPU offloading (CPU only)
+
+  if (llama_supports_gpu_offload()) {
+    size_t n_devs = ggml_backend_dev_count();
+    bool has_gpu = false;
+
+    LOG_INFO("Investigating GPU support for build...");
+    for (size_t i = 0; i < n_devs; ++i) {
+      ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+      ggml_backend_dev_props props;
+      ggml_backend_dev_get_props(dev, &props);
+
+      LOG_INFO("Device " + std::to_string(i) + ": " + props.name + " (" +
+               props.description + ")");
+
+      // Try to find a Discrete or Integrated GPU that actually supports compute
+      if (props.type == GGML_BACKEND_DEVICE_TYPE_GPU ||
+          props.type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+        has_gpu = true;
+        LOG_INFO("Selected GPU for acceleration: " + std::string(props.name));
+        break;
+      }
+    }
+
+    if (has_gpu) {
+      m_params.n_gpu_layers = 99; // Safe to offload
+      LOG_INFO("GPU acceleration enabled (99 layers).");
+    } else {
+      LOG_INFO("No dedicated or integrated GPU detected. Falling back to CPU.");
+    }
+  } else {
+    LOG_INFO("Llama.cpp build does not support GPU offloading.");
+  }
+
   m_model = llama_model_load_from_file(modelPath.c_str(), m_params);
 
   if (m_model) {
@@ -38,10 +74,6 @@ ChatTemplate LlamaManager::GetQwenTemplate() {
   return {"<|im_start|>system\n",    "<|im_end|>\n",
           "<|im_start|>user\n",      "<|im_end|>\n",
           "<|im_start|>assistant\n", "<|im_end|>\n"};
-}
-
-ChatTemplate LlamaManager::GetDeepSeekTemplate() {
-  return {"", "\n", "### Instruction:\n", "\n", "### Response:\n", ""};
 }
 
 void LlamaManager::ResetContext() {
@@ -81,20 +113,20 @@ std::string LlamaManager::GenerateCommand(
         "to assist with Windows command-line operations, system "
         "administration, and automation.\n"
         "CRITICAL RULES:\n"
-        "1. Output exactly one FLAT JSON object: {\"cmd\": \"...\", \"why\": "
-        "\"...\"}\n"
+        "1. Output ONLY the raw command. No JSON, no markdown, no "
+        "explanation.\n"
         "2. Ensure parameters are accurate for Windows. Example: use 'powercfg "
         "/batteryreport' NOT '-batterystats'.\n"
         "3. If the user says a command was wrong, listen and fix it in the NEW "
         "response.\n"
         "4. RAW commands only (no wrapping). Use '&&' or ';' for multi-step.\n"
-        "5. NO conversational filler.\n"
+        "5. NO conversational filler. NO preamble like 'Sure, here is your "
+        "command'.\n"
         "6. IF THE USER ASKS ANYTHING UNRELATED to Windows CLI, REJECT it "
-        "immediately with {\"cmd\": \"DENIED\", \"why\": \"...\"}.\n"
+        "immediately with 'DENIED'.\n"
         "EXAMPLES:\n"
         "User: show my ip and active ports\n"
-        "Assistant: {\"cmd\": \"ipconfig && netstat -an\", \"why\": \"Lists IP "
-        "configuration and active network connections.\"}\n";
+        "Assistant: ipconfig && netstat -an\n";
 
     // Model-specific logic tweaks (if any) can be appended if necessary,
     // but the Master rules above overwrite them.
@@ -180,8 +212,9 @@ std::string LlamaManager::GenerateCommand(
     int n = llama_token_to_piece(vocab, id, buf, sizeof(buf), 0, true);
     if (n > 0) {
       std::string piece(buf, n);
-      // Check for template end tags in response
-      if (piece.find("<|") != std::string::npos)
+      // Check for template end tags OR newlines (for Raw Only mode) in response
+      if (piece.find("<|") != std::string::npos ||
+          piece.find('\n') != std::string::npos)
         break;
       response += piece;
       if (callback)

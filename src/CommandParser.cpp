@@ -156,21 +156,16 @@ ParsedCommand CommandParser::Parse(const std::string &input) {
     }
   }
 
-  // TIER 5: Fallback
-  std::string firstLine;
-  size_t nl = fullResponse.find_first_of("\n\r");
-  if (nl != std::string::npos)
-    firstLine = fullResponse.substr(0, nl);
-  else
-    firstLine = fullResponse;
-  trim(firstLine);
-  if (!firstLine.empty() && firstLine.length() > 2) {
+  // TIER 5: Cleaned Fallback (Entire Response)
+  std::string cleaned = fullResponse;
+  trim(cleaned);
+  if (!cleaned.empty() && cleaned.length() >= 2) {
     // DISQUALIFIER: Avoid malformed JSON { or [ as fallbacks
-    if (firstLine.front() == '{' || firstLine.front() == '[')
+    if (cleaned.front() == '{' || cleaned.front() == '[')
       return result;
 
-    result.command = firstLine;
-    result.explanation = "Fallback: Identified first significant line.";
+    result.command = cleaned;
+    result.explanation = "Suggested command for your request.";
     result.success = true;
   }
 
