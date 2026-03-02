@@ -27,7 +27,7 @@ A local-first Windows CLI orchestrator that translates natural language into ter
 
 Don't want to build from source? 
 1. Go to the **[Releases](https://github.com/YourUsername/cmdAI/releases)** page.
-2. Download the latest `cmdAI-Portable.zip`.
+2. Download the latest `Terminal Co-Pilot.zip`.
 3. Extract and run `cmdAI.exe`.
 
 *📦 Size: ~20MB (Executables ONLY) or ~370MB (With 0.5B Model).*
@@ -44,7 +44,7 @@ Don't want to build from source?
 
 1. **📥 Clone**:
    ```bash
-   git clone https://github.com/YourUsername/cmdAI.git
+   git clone https://github.com/ImJarvis/AIShell.git
    cd cmdAI
    git submodule update --init --recursive
    ```
