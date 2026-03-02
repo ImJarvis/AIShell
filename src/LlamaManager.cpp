@@ -40,10 +40,6 @@ ChatTemplate LlamaManager::GetQwenTemplate() {
           "<|im_start|>assistant\n", "<|im_end|>\n"};
 }
 
-ChatTemplate LlamaManager::GetDeepSeekTemplate() {
-  return {"", "\n", "### Instruction:\n", "\n", "### Response:\n", ""};
-}
-
 void LlamaManager::ResetContext() {
   m_historyTokens.clear();
   if (m_ctx) {

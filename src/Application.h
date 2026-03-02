@@ -25,11 +25,10 @@ private:
 
   // Model Selection
   int m_SelectedModelIndex = 0;
-  const std::vector<std::string> m_ModelOptions = {
-      "Qwen 2.5 Coder 1.5B", "DeepSeek-Coder 1.3B", "Phi-3.5 Mini 3.8B"};
+  const std::vector<std::string> m_ModelOptions = {"Qwen 2.5 Coder 1.5B",
+                                                   "Phi-3.5 Mini 3.8B"};
   const std::vector<std::string> m_ModelFiles = {
       "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-      "deepseek-coder-1.3b-instruct-q4_k_m.gguf",
       "phi-3.5-mini-instruct-q4_k_m.gguf"};
 
   void SwitchToModel(int index);

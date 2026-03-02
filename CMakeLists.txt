@@ -26,19 +26,6 @@ if (NOT EXISTS "${PHI_GGUF}")
     file(DOWNLOAD https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf "${PHI_GGUF}" SHOW_PROGRESS)
 endif()
 
-# 4. Qwen 0.5B Setup (Portable/Fast version)
-set(QWEN05_GGUF "${MODEL_DIR}/qwen2.5-0.5b-instruct-q4_k_m.gguf")
-if (NOT EXISTS "${QWEN05_GGUF}")
-    message(STATUS "Downloading Qwen 2.5 0.5B GGUF...")
-    file(DOWNLOAD https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf "${QWEN05_GGUF}" SHOW_PROGRESS)
-endif()
-
-# 5. DeepSeek-Coder Setup
-set(DEEPSEEK_GGUF "${MODEL_DIR}/deepseek-coder-1.3b-instruct-q4_k_m.gguf")
-if (NOT EXISTS "${DEEPSEEK_GGUF}")
-    message(STATUS "Downloading DeepSeek-Coder 1.3B GGUF...")
-    file(DOWNLOAD https://huggingface.co/bartowski/deepseek-coder-1.3b-instruct-GGUF/resolve/main/deepseek-coder-1.3b-instruct-Q4_K_M.gguf "${DEEPSEEK_GGUF}" SHOW_PROGRESS)
-endif()
 
 
 set(CMAKE_CXX_STANDARD 17)
@@ -141,13 +128,6 @@ add_custom_command(TARGET AIHollowShell POST_BUILD
         "${PHI_GGUF}"
         $<TARGET_FILE_DIR:AIHollowShell>
 
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${QWEN05_GGUF}"
-        $<TARGET_FILE_DIR:AIHollowShell>
-
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${DEEPSEEK_GGUF}"
-        $<TARGET_FILE_DIR:AIHollowShell>
 
     COMMAND_EXPAND_LISTS
 )
