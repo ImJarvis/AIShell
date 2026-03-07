@@ -68,6 +68,7 @@ void Application::SwitchToModel(int index) {
     m_IsLoadingModel = false;
     m_aiResponse = m_ModelOptions[index] + " is ready.";
     m_ChatHistory.push_back({"AI", m_aiResponse, "", false, false, {}});
+    m_ScrollToBottom = true;
   });
 }
 
@@ -556,6 +557,7 @@ void Application::Run() {
           });
         });
       }
+      m_ScrollToBottom = true;
       memset(inputBuffer, 0, 512);
     }
     if (!canOperateStatus)

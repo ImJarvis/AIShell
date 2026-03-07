@@ -1,6 +1,5 @@
 #include "LlamaManager.h"
 #include "Logger.h"
-#include <iostream>
 #include <vector>
 
 LlamaManager::LlamaManager(const std::string &modelPath,
@@ -151,6 +150,22 @@ std::string LlamaManager::GenerateCommand(
   llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
   llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.95f, 1));
   llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.2f));
+
+  // GBNF Grammar: Guarantee FLAT JSON {"cmd": "...", "why": "..."}
+  const char *grammar_str = R"(
+        root   ::= object
+        object ::= "{" ws "\"cmd\"" ws ":" ws string "," ws "\"why\"" ws ":" ws string ws "}"
+        string ::= "\"" (([^\"] | "\\" [\"\\/bfnrt] | "\\u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])* ) "\""
+        ws     ::= [ \t\n\r]*
+    )";
+  struct llama_sampler *g_smpl =
+      llama_sampler_init_grammar(vocab, grammar_str, "root");
+  if (g_smpl) {
+    llama_sampler_chain_add(sampler, g_smpl);
+  } else {
+    LOG_ERROR("Failed to initialize GBNF grammar sampler.");
+  }
+
   llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
   std::string response = "";
