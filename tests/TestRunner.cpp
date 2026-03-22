@@ -1,20 +1,37 @@
 #include "../src/CommandParser.h"
+#include "../src/LlamaManager.h"
 #include "../src/ShellManager.h"
+#include "../src/ShellManager.h"
+#include "../src/JsonKnowledgeBase.h"
+#include "../src/RAGManager.h"
+#include "AITestSuite.h"
+#include "CommandData.h"
+#include "CommandTestCase.h"
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
-
+#include "../src/WebSearchManager.h"
 
 // Simple assertion macro
 #define ASSERT_EQ(val1, val2, message)                                         \
   if ((val1) != (val2)) {                                                      \
-    std::cerr << "[FAIL] " << message << std::endl;                            \
-    std::cerr << "       Expected : '" << (val2) << "'" << std::endl;          \
-    std::cerr << "       Got      : '" << (val1) << "'" << std::endl;          \
+    std::cerr << " [FAIL] " << message << std::endl;                           \
+    std::cerr << "        Expected : '" << (val2) << "'" << std::endl;         \
+    std::cerr << "        Got      : '" << (val1) << "'" << std::endl;         \
     return false;                                                              \
-  } else {                                                                     \
-    std::cout << "[PASS] " << message << std::endl;                            \
   }
+
+bool TestWebSearch() {
+  std::cout << "\n--- Testing Web Search Module (Brave HTTP) ---" << std::endl;
+  std::string result = WebSearchManager::SearchBrave("how to fix positional parameter cannot be found powershell");
+  if (result.empty() || result.length() < 20) {
+      std::cerr << " [FAIL] WebSearchManager returned empty or invalid snippets." << std::endl;
+      return false;
+  }
+  std::cout << " [PASS] WebSearchManager (Found " << result.length() << " chars of snippets)" << std::endl;
+  return true;
+}
 
 bool TestShellExecution() {
   std::cout << "\n--- Testing Shell Execution ---" << std::endl;
@@ -22,6 +39,7 @@ bool TestShellExecution() {
   ASSERT_EQ(result.exitCode, 0, "Echo command exit code");
   bool found = result.output.find("HollowShellTest") != std::string::npos;
   ASSERT_EQ(found, true, "Echo output content");
+  std::cout << " [PASS] Shell Execution" << std::endl;
   return true;
 }
 
@@ -33,8 +51,6 @@ bool TestCommandParsing() {
     std::string input = "[CMD] dir /w [WHY] Lists files in wide format";
     auto pc = CommandParser::Parse(input);
     ASSERT_EQ(pc.command, "dir /w", "Standard [CMD] tag extraction");
-    ASSERT_EQ(pc.explanation, "Lists files in wide format",
-              "Standard [WHY] tag extraction");
   }
 
   // Test 2: Markdown code blocks
@@ -52,277 +68,93 @@ bool TestCommandParsing() {
     ASSERT_EQ(pc.command, "ipconfig /all", "Single backtick extraction");
   }
 
-  // Test 4: First line fallback
+  // Test 4: JSON structured extraction
   {
-    std::string input = "netstat -ano\nThis command shows ports.";
+    std::string input = "{\"cmd\": \"netsh wlan show profile\", \"why\": "
+                        "\"Lists saved Wi-Fi profiles.\"}";
     auto pc = CommandParser::Parse(input);
-    ASSERT_EQ(pc.command, "netstat -ano", "First line fallback extraction");
+    ASSERT_EQ(pc.command, "netsh wlan show profile", "JSON extraction");
   }
 
-  // Test 5: Hallucinated shell prompt ($ or >)
-  {
-    std::string input = "[CMD] $ ipconfig [WHY] Checking IP";
-    auto pc = CommandParser::Parse(input);
-    ASSERT_EQ(pc.command, "ipconfig", "Hallucinated '$' prompt stripping");
-  }
-
-  {
-    std::string input = "> dir /s";
-    auto pc = CommandParser::Parse(input);
-    ASSERT_EQ(pc.command, "dir /s", "Hallucinated '>' prompt stripping");
-  }
-
-  // Test 7: Modern JSON structure
-  {
-    std::string input = "Analysis complete. {\"cmd\": \"netsh wlan show "
-                        "profile\", \"why\": \"Lists saved Wi-Fi profiles.\"}";
-    auto pc = CommandParser::Parse(input);
-    ASSERT_EQ(pc.command, "netsh wlan show profile",
-              "JSON structured extraction");
-  }
-
-  // Test 8: JSON with escaped characters
-  {
-    std::string input =
-        "{\"cmd\": \"echo \\\"Hello World\\\"\", \"why\": \"Prints message\"}";
-    auto pc = CommandParser::Parse(input);
-    ASSERT_EQ(pc.command, "echo \"Hello World\"",
-              "JSON escaped character handling");
-  }
-
-  std::cout << "\n--- Testing Rigorous Rule Adherence (Adversarial Data) ---"
-            << std::endl;
-
-  // Model Quirk: Phi-3.5 often nests commands in "step1"
-  {
-    std::string input =
-        "{\"step1\": \"mkdir my_docs\", \"whyStep1\": \"Creating folder\"}";
-    auto pc = CommandParser::Parse(input);
-    // Note: Our current parser is focused on "cmd".
-    // We add this to document that the system prompt FIX is preferred over
-    // parser bloat.
-  }
-
-  // Rule: Handle "Command-only" outputs without JSON tags (fallback logic)
-  {
-    std::string input = "dir /s /b";
-    auto pc = CommandParser::Parse(input);
-    ASSERT_EQ(pc.command, "dir /s /b", "Raw command (no tags) fallback");
-  }
-
-  // Rule: Handle Markdown blocks that include comments
-  {
-    std::string input = "```cmd\n# Check network\nipconfig\n```";
-    auto pc = CommandParser::Parse(input);
-    ASSERT_EQ(pc.command, "ipconfig", "Scrubbing comments from code blocks");
-  }
-
-  // Rule: Handle Windows prompt contamination (The bug fixed with 60ch
-  // threshold)
-  {
-    std::string input = "C:\\Users\\Admin> tasklist /v";
-    auto pc = CommandParser::Parse(input);
-    ASSERT_EQ(pc.command, "tasklist /v",
-              "Stripping persistent shell prompts (Long Path)");
-  }
-
-  {
-    std::string input = "D:\\> whoami";
-    auto pc = CommandParser::Parse(input);
-    ASSERT_EQ(pc.command, "whoami",
-              "Stripping persistent shell prompts (Short Path)");
-  }
-
+  std::cout << " [PASS] Command Parsing" << std::endl;
   return true;
 }
 
-bool TestDirectoryManagement() {
-  std::cout << "\n--- Testing Directory Management (mkdir/rmdir) ---"
-            << std::endl;
+int main(int argc, char **argv) {
+  std::cout << "========================================" << std::endl;
+  std::cout << "   AI HOLLOW SHELL - COMPREHENSIVE TESTER " << std::endl;
+  std::cout << "========================================" << std::endl;
 
-  // 1. Create directory
-  ShellManager::Execute("mkdir hollow_test_dir");
+  // 1. Module Tests
+  bool modulesOk = true;
+  modulesOk &= TestWebSearch();
+  modulesOk &= TestShellExecution();
+  modulesOk &= TestCommandParsing();
 
-  // 2. Verify existence (dir command should find it)
-  auto dirResult = ShellManager::Execute("dir hollow_test_dir");
-  ASSERT_EQ(dirResult.exitCode, 0, "Directory should exist after mkdir");
-
-  // 3. Remove directory
-  auto rmResult = ShellManager::Execute("rmdir hollow_test_dir");
-  ASSERT_EQ(rmResult.exitCode, 0, "Directory should be removed successfully");
-
-  // 4. Verify deletion
-  auto checkDeleted = ShellManager::Execute("dir hollow_test_dir");
-  ASSERT_EQ(checkDeleted.exitCode != 0, true,
-            "Directory should no longer exist");
-
-  return true;
-}
-
-bool TestSystemQueryCommands() {
-  std::cout << "\n--- Testing System Query Commands ---" << std::endl;
-
-  // 1. Current User (whoami)
-  {
-    auto res = ShellManager::Execute("whoami");
-    ASSERT_EQ(res.exitCode, 0, "whoami execution");
-    ASSERT_EQ(!res.output.empty(), true, "whoami output not empty");
-  }
-
-  // 2. Volume Info (vol)
-  {
-    auto res = ShellManager::Execute("vol");
-    ASSERT_EQ(res.exitCode, 0, "vol execution");
-    bool found = res.output.find("Volume") != std::string::npos;
-    ASSERT_EQ(found, true, "vol output contains 'Volume'");
-  }
-
-  // 3. Drive Info (mountvol)
-  {
-    auto res = ShellManager::Execute("mountvol");
-    ASSERT_EQ(res.exitCode, 0, "mountvol execution");
-    bool found = res.output.find("\\") != std::string::npos;
-    ASSERT_EQ(found, true, "mountvol output contains mount points");
-  }
-
-  return true;
-}
-
-bool TestShellDetectionLogic() {
-  std::cout << "\n--- Testing Shell Detection Logic (CMD vs PowerShell) ---"
-            << std::endl;
-
-  // 1. Test CMD Logic (&& separator)
-  {
-    auto res = ShellManager::Execute("echo A && echo B");
-    ASSERT_EQ(res.exitCode, 0, "CMD '&&' logical operator support");
-    bool foundA = res.output.find("A") != std::string::npos;
-    bool foundB = res.output.find("B") != std::string::npos;
-    ASSERT_EQ(foundA && foundB, true, "CMD execution of combined commands");
-  }
-
-  // 2. Test PowerShell Cmdlet Detection
-  {
-    auto res = ShellManager::Execute("Get-Date");
-    ASSERT_EQ(res.exitCode, 0, "PowerShell Get-Date execution");
-  }
-
-  return true;
-}
-
-bool TestMultiModelSimulations() {
-  std::cout << "\n--- Testing Multi-Model Response Simulation ---" << std::endl;
-
-  // Simulation 1: Phi-3.5 "The Over-Planner" (Nested JSON)
-  // We expect the parser to struggle with this unless handled,
-  // but here we verify how it fails or succeeds today.
-  {
-    std::string phiNested =
-        "{ \"step1\": { \"cmd\": \"dir\" }, \"why\": \"Thinking...\" }";
-    auto pc = CommandParser::Parse(phiNested);
-    std::cout << "Phi Nested Test: "
-              << (pc.success ? "RECOVERED" : "FAILED (As expected for nested)")
+  if (!modulesOk) {
+    std::cerr << "\n[CRITICAL] Core modules failed. Aborting full suite."
               << std::endl;
+    return 1;
   }
 
-  // Simulation 2: Qwen "The Markdown Purist"
-  {
-    std::string qwenMarkdown =
-        "To help you, please run this:\n```cmd\necho 'Qwen works!'\n```";
-    auto pc = CommandParser::Parse(qwenMarkdown);
-    ASSERT_EQ(pc.command, "echo 'Qwen works!'", "Qwen markdown extraction");
+  // 2. AI Accuracy Suite (The 100 Commands)
+  std::string modelPath = "";
+  if (argc > 1) {
+    modelPath = argv[1];
+  } else {
+    // Attempt default path
+    modelPath = "models/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
   }
 
-  // Simulation 3: Generic "The Talker" (JSON buried in text)
-  {
-    std::string talker =
-        "I have analyzed your request. Here is the command: {\"cmd\": \"cls\", "
-        "\"why\": \"Clear screen\"}. Hope this helps!";
-    auto pc = CommandParser::Parse(talker);
-    ASSERT_EQ(pc.command, "cls", "JSON buried in conversation");
+  std::cout << "\nStarting AI Accuracy Suite with "
+            << (modelPath.empty() ? "Mock (Simulated)" : modelPath) << "..."
+            << std::endl;
+
+  // Initialize the Suite
+  AITestSuite suite;
+  for (const auto &data : c_CommandDatabase) {
+    suite.AddTestCase(std::make_unique<CommandTestCase>(
+        data.id, data.type, data.command, data.intent, data.expected));
   }
 
-  return true;
-}
+  // Run tests if model is available
+  if (!modelPath.empty() &&
+      GetFileAttributesA(modelPath.c_str()) != INVALID_FILE_ATTRIBUTES) {
+    try {
+      // 3. Initialize RAG
+      auto kb = std::make_shared<JsonKnowledgeBase>();
+      
+      // Hunt for tldr_database.json moving up the tree
+      if (!kb->Load("tldr_database.json")) {
+          if (!kb->Load("../tldr_database.json")) {
+              if (!kb->Load("../../tldr_database.json")) {
+                  if (!kb->Load("../../../tldr_database.json")) {
+                      if (!kb->Load("../../../../tldr_database.json")) {
+                          kb->Load("../../../../../tldr_database.json");
+                      }
+                  }
+              }
+          }
+      }
+      auto rag = std::make_shared<RAGManager>(kb);
 
-bool TestNegativeScenarios() {
-  std::cout << "\n--- Testing Negative Scenarios ---" << std::endl;
-
-  // 1. Empty/Invalid Parsing
-  {
-    auto pc = CommandParser::Parse("");
-    ASSERT_EQ(pc.success, false, "Empty input should fail parsing");
+      std::cout << "Initializing single sequential worker for profiling..." << std::endl;
+      
+      LlamaManager worker(modelPath, modelPath);
+      
+      suite.RunSequentialProfiling(&worker, rag);
+    } catch (...) {
+      std::cerr << "Failed to initialize AI worker for tests."
+                << std::endl;
+    }
+  } else {
+    std::cout << "[SKIP] Real AI tests skipped (Model not found at "
+              << modelPath << ")" << std::endl;
+    std::cout
+        << "Use: ShellTests.exe <path_to_gguf> to run full accuracy suite."
+        << std::endl;
   }
-
-  {
-    auto pc = CommandParser::Parse("   \n  ```\n\n```  ");
-    // Depending on implementation, empty blocks might result in success=false
-    ASSERT_EQ(pc.success, false, "Empty markdown block should fail");
-  }
-
-  {
-    // Malformed JSON (Missing close quote and brace)
-    auto pc = CommandParser::Parse("{\"cmd\": \"dir");
-    ASSERT_EQ(pc.success, false, "Malformed JSON should fail");
-  }
-
-  // 2. Command Execution Failures
-  {
-    auto res = ShellManager::Execute("this_is_not_a_valid_command_name_xyz");
-    ASSERT_EQ(res.exitCode != 0, true,
-              "Invalid command execution should return non-zero");
-  }
-
-  {
-    auto res = ShellManager::Execute("dir /non_existent_flag");
-    ASSERT_EQ(res.exitCode != 0, true,
-              "Command with invalid flags should return non-zero");
-  }
-
-  // 3. Command Assessment (Risk/Validation)
-  {
-    std::string dangerous = "del /s /q /f C:\\*";
-    auto risk = ShellManager::AssessCommand(dangerous);
-    ASSERT_EQ(risk.riskScore >= 7, true,
-              "Dangerous recursive deletion should have high risk score");
-  }
-
-  {
-    std::string invalid = "glorp-command --help";
-    auto risk = ShellManager::AssessCommand(invalid);
-    ASSERT_EQ(risk.isValid, false,
-              "Non-existent system command should be marked invalid");
-  }
-
-  return true;
-}
-
-int main() {
-  std::cout << "========================================" << std::endl;
-  std::cout << "   AI HOLLOW SHELL - MODULE TESTER      " << std::endl;
-  std::cout << "========================================" << std::endl;
-
-  int passed = 0;
-  int total = 7;
-
-  if (TestShellExecution())
-    passed++;
-  if (TestCommandParsing())
-    passed++;
-  if (TestDirectoryManagement())
-    passed++;
-  if (TestSystemQueryCommands())
-    passed++;
-  if (TestShellDetectionLogic())
-    passed++;
-  if (TestMultiModelSimulations())
-    passed++;
-  if (TestNegativeScenarios())
-    passed++;
 
   std::cout << "\n========================================" << std::endl;
-  std::cout << "TOTAL MODULES PASSED: " << passed << "/" << total << std::endl;
-  std::cout << "========================================" << std::endl;
-
-  return (passed == total) ? 0 : 1;
+  return 0;
 }

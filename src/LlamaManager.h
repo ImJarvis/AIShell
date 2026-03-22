@@ -1,8 +1,8 @@
 #pragma once
 #include "IAIProvider.h"
-#include "common.h"
 #include "llama.h"
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -22,9 +22,11 @@ public:
   ~LlamaManager();
 
   // IAIProvider Implementation
-  std::string GenerateCommand(
-      const std::string &input,
-      std::function<void(const std::string &)> callback = nullptr) override;
+  std::string
+  GenerateCommand(const std::string &input,
+                  std::function<void(const std::string &)> callback = nullptr,
+                  const std::string &hints = "",
+                  bool rawOnly = true) override;
   void ResetContext() override;
   std::string GetModelName() const override { return m_modelName; }
 
@@ -32,8 +34,8 @@ public:
   void SetTemplate(const ChatTemplate &tmpl) { m_template = tmpl; }
 
   // Presets
-  static ChatTemplate GetTinyLlamaTemplate();
-  static ChatTemplate GetPhi3Template();
+  static ChatTemplate GetGemmaTemplate();
+  static ChatTemplate GetLlama3Template();
   static ChatTemplate GetQwenTemplate();
 
 private:
@@ -42,6 +44,7 @@ private:
   std::vector<llama_token> m_historyTokens;
   std::string m_modelName;
   ChatTemplate m_template;
+  mutable std::recursive_mutex m_ctxMutex;
 
   // Parameters for generation
   int32_t m_n_predict = 256;

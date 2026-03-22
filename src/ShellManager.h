@@ -12,6 +12,50 @@
 #include <windows.h>
 
 class ShellManager {
+private:
+  static std::string ps_base64_encode(const std::string& command) {
+      if (command.empty()) return "";
+      int wlen = MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, NULL, 0);
+      if (wlen <= 0) return "";
+      std::vector<wchar_t> wbuf(wlen);
+      MultiByteToWideChar(CP_UTF8, 0, command.c_str(), -1, wbuf.data(), wlen);
+      
+      int byteLen = (wlen - 1) * sizeof(wchar_t);
+      const unsigned char* buf = (const unsigned char*)wbuf.data();
+      
+      static const std::string base64_chars = 
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+          "abcdefghijklmnopqrstuvwxyz"
+          "0123456789+/";
+          
+      std::string ret;
+      int i = 0, j = 0;
+      unsigned char char_array_3[3];
+      unsigned char char_array_4[4];
+
+      while (byteLen--) {
+          char_array_3[i++] = *(buf++);
+          if (i == 3) {
+              char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+              char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+              char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+              char_array_4[3] = char_array_3[2] & 0x3f;
+              for(i = 0; (i <4) ; i++) ret += base64_chars[char_array_4[i]];
+              i = 0;
+          }
+      }
+      if (i) {
+          for(j = i; j < 3; j++) char_array_3[j] = '\0';
+          char_array_4[0] = (char_array_3[0] & 0xfc) >> 2;
+          char_array_4[1] = ((char_array_3[0] & 0x03) << 4) + ((char_array_3[1] & 0xf0) >> 4);
+          char_array_4[2] = ((char_array_3[1] & 0x0f) << 2) + ((char_array_3[2] & 0xc0) >> 6);
+          char_array_4[3] = char_array_3[2] & 0x3f;
+          for (j = 0; (j < i + 1); j++) ret += base64_chars[char_array_4[j]];
+          while((i++ < 3)) ret += '=';
+      }
+      return ret;
+  }
+
 public:
   struct ExecuteResult {
     int exitCode;
@@ -129,17 +173,22 @@ public:
       }
 
       if (!found) {
-        std::vector<std::string> extensions = {"", ".exe", ".com", ".bat",
-                                               ".cmd"};
         bool pathFound = false;
-        for (const auto &ext : extensions) {
-          char fullPath[MAX_PATH];
-          char *filePart;
-          std::string checkCmd = baseCmd + ext;
-          if (SearchPathA(NULL, checkCmd.c_str(), NULL, MAX_PATH, fullPath,
-                          &filePart) > 0) {
-            pathFound = true;
-            break;
+        if (baseCmd.find('-') != std::string::npos) {
+          // It's likely a PowerShell Cmdlet (e.g., Get-Process), assume valid
+          pathFound = true;
+        } else {
+          std::vector<std::string> extensions = {"", ".exe", ".com", ".bat",
+                                                 ".cmd"};
+          for (const auto &ext : extensions) {
+            char fullPath[MAX_PATH];
+            char *filePart;
+            std::string checkCmd = baseCmd + ext;
+            if (SearchPathA(NULL, checkCmd.c_str(), NULL, MAX_PATH, fullPath,
+                            &filePart) > 0) {
+              pathFound = true;
+              break;
+            }
           }
         }
         if (!pathFound) {
@@ -182,21 +231,13 @@ public:
     bool isPowerShell = !hasCmdLogic && (hasCmdlet || hasPsVar || startsWithPs);
 
     if (isPowerShell) {
-      // SECURITY OPTIMIZATION: Wrap in script block and escape PS-specific
-      // tokens
-      std::string escaped = "";
-      for (char c : command) {
-        if (c == '\"')
-          escaped += "`\"";
-        else if (c == '$' || c == '(' || c == ')' || c == '{' || c == '}' ||
-                 c == '`')
-          escaped += "`" + std::string(1, c);
-        else
-          escaped += c;
-      }
+      // Encode as Base64 to entirely bypass CMD and powershell quotation issues.
+      // We wrap the raw command to suppress CLIXML progress noise and force errors into plaintext streams.
+      // RCA FIX: We also explicitly cache $LASTEXITCODE and $? before the pipeline overwrites them so the C++ parent receives the actual failure code!
+      std::string safeWrapper = "$ProgressPreference='SilentlyContinue'; $err = $false; $out = & { " + command + " } 2>&1; if (!$? -or $LASTEXITCODE) { $err = $true }; $out | Out-String -Stream; if ($err) { exit 1 }";
+      std::string encodedCmd = ps_base64_encode(safeWrapper);
       fullCmdLine =
-          "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& { " +
-          escaped + " }\"";
+          "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand " + encodedCmd;
     } else {
       // Use standard CMD /C. The Outer quotes are handled by the system
       // when passed to CreateProcess via cmdBuffer.
@@ -292,9 +333,30 @@ public:
       reader.join();
     result.output = ssOutput.str();
 
-    CloseHandle(hRead);
-    CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
     return result;
+  }
+
+  // Fast help scraper for specific commands
+  static std::string GetHelp(const std::string &command) {
+    if (command.empty())
+      return "";
+
+    // We run the command with /? and limit it to first few lines
+    // This uses a very fast timeout to ensure no hang
+    std::string helpCmd = command + " /?";
+    auto res = Execute(helpCmd);
+
+    std::stringstream ss(res.output);
+    std::string line;
+    std::string summary = "";
+    int count = 0;
+    while (std::getline(ss, line) && count < 6) {
+      if (line.find_first_not_of(" \t\r\n") != std::string::npos) {
+        summary += line + "\n";
+        count++;
+      }
+    }
+    return summary;
   }
 };

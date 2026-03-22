@@ -5,13 +5,6 @@ project(AIHollowShell)
 set(MODEL_DIR "${CMAKE_SOURCE_DIR}/models")
 file(MAKE_DIRECTORY "${MODEL_DIR}")
 
-# 1. TinyLlama Setup (REMOVED)
-# set(TINYLLAMA_GGUF "${MODEL_DIR}/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf")
-# if (NOT EXISTS "${TINYLLAMA_GGUF}")
-#     message(STATUS "Downloading TinyLlama GGUF...")
-#     file(DOWNLOAD https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_K_M.gguf "${TINYLLAMA_GGUF}" SHOW_PROGRESS)
-# endif()
-
 # 2. Qwen Setup
 set(QWEN_GGUF "${MODEL_DIR}/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf")
 if (NOT EXISTS "${QWEN_GGUF}")
@@ -19,11 +12,26 @@ if (NOT EXISTS "${QWEN_GGUF}")
     file(DOWNLOAD https://huggingface.co/bartowski/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/Qwen2.5-Coder-1.5B-Instruct-Q4_K_M.gguf "${QWEN_GGUF}" SHOW_PROGRESS)
 endif()
 
-# 3. Phi-3.5 Setup
-set(PHI_GGUF "${MODEL_DIR}/phi-3.5-mini-instruct-q4_k_m.gguf")
-if (NOT EXISTS "${PHI_GGUF}")
-    message(STATUS "Downloading Phi-3.5 Mini GGUF...")
-    file(DOWNLOAD https://huggingface.co/bartowski/Phi-3.5-mini-instruct-GGUF/resolve/main/Phi-3.5-mini-instruct-Q4_K_M.gguf "${PHI_GGUF}" SHOW_PROGRESS)
+# 3. Llama 3.2 Setup
+set(LLAMA3_GGUF "${MODEL_DIR}/Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+if (NOT EXISTS "${LLAMA3_GGUF}")
+    message(STATUS "Downloading Meta-Llama 3.2 3B Instruct GGUF...")
+    file(DOWNLOAD https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf "${LLAMA3_GGUF}" SHOW_PROGRESS)
+endif()
+
+# 4. Gemma 3 Setup
+set(GEMMA_GGUF "${MODEL_DIR}/google_gemma-3-4b-it-q4_k_m.gguf")
+# Robust check: if file is non-existent OR suspiciously small (<1MB), re-download
+if (EXISTS "${GEMMA_GGUF}")
+    file(SIZE "${GEMMA_GGUF}" GEMMA_SIZE)
+    if (GEMMA_SIZE LESS 1000000)
+        file(REMOVE "${GEMMA_GGUF}")
+    endif()
+endif()
+
+if (NOT EXISTS "${GEMMA_GGUF}")
+    message(STATUS "Downloading Gemma 3 4B Instruct GGUF (Bartowski)...")
+    file(DOWNLOAD https://huggingface.co/bartowski/google_gemma-3-4b-it-GGUF/resolve/main/google_gemma-3-4b-it-Q4_K_M.gguf "${GEMMA_GGUF}" SHOW_PROGRESS)
 endif()
 
 
@@ -78,6 +86,10 @@ add_executable(AIHollowShell
 add_executable(ShellTests 
     tests/TestRunner.cpp 
     "src/CommandParser.cpp"
+    "src/LlamaManager.cpp"
+    "src/JsonKnowledgeBase.cpp"
+    "src/WebSearchManager.cpp"
+    ${COMMON_HELPER_SRCS}
 )
 
 # 7. Include Paths
@@ -93,17 +105,26 @@ target_include_directories(AIHollowShell PRIVATE
 
 target_include_directories(ShellTests PRIVATE
     "${CMAKE_SOURCE_DIR}/src"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${LLAMA_DIR}/include"
+    "${LLAMA_DIR}/ggml/include"
+    "${LLAMA_DIR}/common"
 )
 
 # 8. Linking
 target_link_libraries(AIHollowShell PRIVATE 
     llama       
     ggml
+    winhttp
     opengl32
     "${GLFW_DIR}/lib-vc2022/glfw3.lib"
 )
 
-target_link_libraries(ShellTests PRIVATE)
+target_link_libraries(ShellTests PRIVATE 
+    llama 
+    ggml
+    winhttp
+)
 
 # 9. MSVC Fixes
 if(MSVC)
@@ -113,22 +134,29 @@ endif()
 
 # Automatically copy all runtime DLLs next to the exe
 add_custom_command(TARGET AIHollowShell POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:AIHollowShell>/models
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_RUNTIME_DLLS:AIHollowShell>
         $<TARGET_FILE_DIR:AIHollowShell>
 
-#    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-#        "${TINYLLAMA_GGUF}"
-#        $<TARGET_FILE_DIR:AIHollowShell>
-
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${QWEN_GGUF}"
-        $<TARGET_FILE_DIR:AIHollowShell>
+        $<TARGET_FILE_DIR:AIHollowShell>/models/
 
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${PHI_GGUF}"
-        $<TARGET_FILE_DIR:AIHollowShell>
+        "${LLAMA3_GGUF}"
+        $<TARGET_FILE_DIR:AIHollowShell>/models/
 
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${GEMMA_GGUF}"
+        $<TARGET_FILE_DIR:AIHollowShell>/models/
 
     COMMAND_EXPAND_LISTS
+)
+
+add_custom_command(TARGET ShellTests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:ShellTests>/models
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${QWEN_GGUF}"
+        $<TARGET_FILE_DIR:ShellTests>/models/
 )

@@ -1,7 +1,7 @@
 #include "LlamaManager.h"
 #include "Logger.h"
 #include "ggml-backend.h"
-#include <iostream>
+#include <mutex>
 #include <vector>
 
 LlamaManager::LlamaManager(const std::string &modelPath,
@@ -49,25 +49,43 @@ LlamaManager::LlamaManager(const std::string &modelPath,
 
   if (m_model) {
     auto c_params = llama_context_default_params();
-    c_params.n_ctx = 2048;
+    c_params.n_ctx = 4096;
+    c_params.n_batch = 2048; // Can decode up to 2048 at a time
     m_ctx = llama_init_from_model(m_model, c_params);
   }
   m_n_predict = 256;
 
-  // Default to TinyLlama template as it matches current usage
-  m_template = GetTinyLlamaTemplate();
+  // Auto-detect template based on name
+  std::string lowerName = m_modelName;
+  for (auto &c : lowerName) c = (char)tolower(c);
+
+  if (lowerName.find("gemma") != std::string::npos) {
+    m_template = GetGemmaTemplate();
+    LOG_INFO("Using Gemma prompt template.");
+  } else if (lowerName.find("qwen") != std::string::npos) {
+    m_template = GetQwenTemplate();
+    LOG_INFO("Using Qwen (ChatML) prompt template.");
+  } else if (lowerName.find("llama") != std::string::npos) {
+    m_template = GetLlama3Template();
+    LOG_INFO("Using Llama-3 prompt template.");
+  } else {
+    m_template = GetLlama3Template(); // Fallback
+    LOG_INFO("Using fallback Llama-3 prompt template.");
+  }
 }
 
-ChatTemplate LlamaManager::GetTinyLlamaTemplate() {
-  return {"<|system|>\n", "<|end|>\n",       "<|user|>\n",
-          "<|end|>\n",    "<|assistant|>\n", "<|end|>\n"};
+ChatTemplate LlamaManager::GetGemmaTemplate() {
+  return {"<start_of_turn>system\n", "<end_of_turn>\n", "<start_of_turn>user\n",
+          "<end_of_turn>\n", "<start_of_turn>assistant\n", "<end_of_turn>\n"};
 }
 
-ChatTemplate LlamaManager::GetPhi3Template() {
-  return {
-      "<|system|>\n",    "<|end|>\n", "<|user|>\n", "<|end|>\n",
-      "<|assistant|>\n", "<|end|>\n" // Phi-3 uses similar tags to ChatML often
-  };
+ChatTemplate LlamaManager::GetLlama3Template() {
+  return {"<|start_header_id|>system<|end_header_id|>\n\n",
+          "<|eot_id|>",
+          "<|start_header_id|>user<|end_header_id|>\n\n",
+          "<|eot_id|>",
+          "<|start_header_id|>assistant<|end_header_id|>\n\n",
+          "<|eot_id|>"};
 }
 
 ChatTemplate LlamaManager::GetQwenTemplate() {
@@ -77,10 +95,10 @@ ChatTemplate LlamaManager::GetQwenTemplate() {
 }
 
 void LlamaManager::ResetContext() {
+  std::lock_guard<std::recursive_mutex> lock(m_ctxMutex);
   m_historyTokens.clear();
   if (m_ctx) {
-    // Updated API for new llama.cpp version: get memory and remove tokens for
-    // sequence 0
+    // Updated API for new llama.cpp version: get memory and remove tokens for sequence 0
     llama_memory_t mem = llama_get_memory(m_ctx);
     llama_memory_seq_rm(mem, 0, -1, -1);
   }
@@ -94,9 +112,11 @@ LlamaManager::~LlamaManager() {
   llama_backend_free();
 }
 
-std::string LlamaManager::GenerateCommand(
-    const std::string &input,
-    std::function<void(const std::string &)> callback) {
+std::string LlamaManager::GenerateCommand(const std::string &input,
+                              std::function<void(const std::string &)> callback,
+                              const std::string &hints,
+                              bool rawOnly) {
+  std::lock_guard<std::recursive_mutex> lock(m_ctxMutex);
   if (!m_model || !m_ctx)
     return "Error: Model not loaded.";
 
@@ -106,36 +126,28 @@ std::string LlamaManager::GenerateCommand(
   std::string turnMessage = "";
 
   if (m_historyTokens.empty()) {
-    // --- MASTER SYSTEM PROMPT (Applied to ALL models) ---
-    // This ensures consistent behavior and flat JSON schema across the app.
+    // --- MASTER SYSTEM PROMPT ---
     std::string masterPrompt =
-        "You are a specialized Windows CLI AI Assistant. Your ONLY purpose is "
-        "to assist with Windows command-line operations, system "
-        "administration, and automation.\n"
+        "You are a specialized CLI Copilot. Your ONLY purpose is to translate user intent into executable Windows commands.\n\n"
         "CRITICAL RULES:\n"
-        "1. Output ONLY the raw command. No JSON, no markdown, no "
-        "explanation.\n"
-        "2. Ensure parameters are accurate for Windows. Example: use 'powercfg "
-        "/batteryreport' NOT '-batterystats'.\n"
-        "3. If the user says a command was wrong, listen and fix it in the NEW "
-        "response.\n"
-        "4. RAW commands only (no wrapping). Use '&&' or ';' for multi-step.\n"
-        "5. NO conversational filler. NO preamble like 'Sure, here is your "
-        "command'.\n"
-        "6. IF THE USER ASKS ANYTHING UNRELATED to Windows CLI, REJECT it "
-        "immediately with 'DENIED'.\n"
+        "1. RAW OUTPUT ONLY: You MUST output the pure, executable command. Absolutely NO markdown formatting, NO backticks (```), and NO explanations.\n"
+        "2. SHELL PREFERENCE: Prefer modern PowerShell syntax unless CMD is explicitly requested or more appropriate for simple tasks.\n"
+        "3. PIVOT RULE: If the user says 'wrong', 'error', or provides error output, DO NOT repeat your previous answer. Infer why it failed and output a different command.\n"
+        "4. TRANSLATION REQUIRED: If SYSTEM REFERENCE documentation is provided, it may be based on Unix/Linux syntax. You MUST strictly translate those core concepts into valid Windows PowerShell equivalents. Never output Linux commands like 'ls', 'grep', 'tar', or 'ps'.\n\n"
         "EXAMPLES:\n"
-        "User: show my ip and active ports\n"
-        "Assistant: ipconfig && netstat -an\n";
-
-    // Model-specific logic tweaks (if any) can be appended if necessary,
-    // but the Master rules above overwrite them.
-    if (m_modelName.find("Phi") != std::string::npos) {
-      masterPrompt += "\nNote: As a Phi model, prioritize conciseness and "
-                      "avoid any preamble.";
-    }
+        "User: show my ip\n"
+        "Assistant: ipconfig\n"
+        "User: list folders in D sorted\n"
+        "Assistant: Get-ChildItem -Path D:\\ -Directory | Sort-Object Name\n";
 
     turnMessage += m_template.systemStart + masterPrompt + m_template.systemEnd;
+  }
+
+  // Inject RAG Hints as a temporary reference Turn if present
+  if (!hints.empty()) {
+    turnMessage += m_template.systemStart +
+                   "SYSTEM REFERENCE (Warning: May be Unix/Linux based. Translate perfectly to native Windows PowerShell !!):\n" + hints +
+                   m_template.systemEnd;
   }
 
   // SECURITY OPTIMIZATION: Sanitize template tokens to prevent prompt injection
@@ -160,7 +172,7 @@ std::string LlamaManager::GenerateCommand(
   newTokens.resize(n_new);
 
   // Batch process new tokens
-  llama_batch batch = llama_batch_init(2048, 0, 1);
+  llama_batch batch = llama_batch_init(n_new + 16, 0, 1);
   batch.n_tokens = n_new;
   for (int i = 0; i < n_new; i++) {
     batch.token[i] = newTokens[i];
@@ -170,9 +182,25 @@ std::string LlamaManager::GenerateCommand(
     batch.logits[i] = (i == n_new - 1);
   }
 
-  if (llama_decode(m_ctx, batch) != 0) {
-    llama_batch_free(batch);
-    return "Error: Decode failed.";
+  // We must decode in chunks if n_new > n_batch
+  int n_batch_size = 2048;
+  for (int i = 0; i < n_new; i += n_batch_size) {
+      int chunk_size = std::min(n_batch_size, n_new - i);
+      llama_batch chunk = llama_batch_init(chunk_size, 0, 1);
+      chunk.n_tokens = chunk_size;
+      for (int j = 0; j < chunk_size; j++) {
+          chunk.token[j] = batch.token[i + j];
+          chunk.pos[j] = batch.pos[i + j];
+          chunk.n_seq_id[j] = 1;
+          chunk.seq_id[j][0] = 0;
+          chunk.logits[j] = batch.logits[i + j];
+      }
+      if (llama_decode(m_ctx, chunk) != 0) {
+          llama_batch_free(chunk);
+          llama_batch_free(batch);
+          return "Error: Decode failed during chunking.";
+      }
+      llama_batch_free(chunk);
   }
 
   m_historyTokens.insert(m_historyTokens.end(), newTokens.begin(),
@@ -186,7 +214,7 @@ std::string LlamaManager::GenerateCommand(
       sampler, llama_sampler_init_penalties(2048, 1.15f, 0.10f, 0.10f));
   llama_sampler_chain_add(sampler, llama_sampler_init_top_k(40));
   llama_sampler_chain_add(sampler, llama_sampler_init_top_p(0.95f, 1));
-  llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.2f));
+  llama_sampler_chain_add(sampler, llama_sampler_init_temp(0.0f));
   llama_sampler_chain_add(sampler, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
   std::string response = "";
@@ -214,7 +242,7 @@ std::string LlamaManager::GenerateCommand(
       std::string piece(buf, n);
       // Check for template end tags OR newlines (for Raw Only mode) in response
       if (piece.find("<|") != std::string::npos ||
-          piece.find('\n') != std::string::npos)
+          (rawOnly && piece.find('\n') != std::string::npos))
         break;
       response += piece;
       if (callback)
