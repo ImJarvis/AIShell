@@ -54,6 +54,12 @@ Application::Application() {
   SwitchToModel(0);
 
   m_IsAdmin = IsRunningAsAdmin();
+
+  // Initialize WinHTTP persistent session asynchronously — runs in background
+  // while the model loads. Sets m_IsOnline which gates the 'Get Help Online' button.
+  std::thread([this]() {
+      m_IsOnline = WebSearchManager::Initialize();
+  }).detach();
 }
 
 Application::~Application() {
@@ -69,6 +75,7 @@ Application::~Application() {
   if (m_ExecThread.valid())
     m_ExecThread.wait();
 
+  WebSearchManager::Shutdown();
   SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
 }
 
@@ -142,21 +149,23 @@ void Application::Run() {
           m_LastGeneratedCommand = pc.command;
           m_CommandExplanation = pc.explanation + timeBuf;
           m_CurrentSafety = ShellManager::AssessCommand(m_LastGeneratedCommand);
-          m_aiResponse =
-              m_CurrentSafety.isValid ? "Validated." : "Verification warning.";
+          if (!m_IsFixing) {
+            m_aiResponse = m_CurrentSafety.isValid ? "Validated." : "Verification warning.";
+          }
         } else {
-          m_aiResponse = "Analysis failed.";
+          if (!m_IsFixing) m_aiResponse = "Analysis failed.";
           m_LastGeneratedCommand = "";
           m_CurrentSafety = {};
           pc.explanation += timeBuf; // Append even on fail
         }
 
-        {
+        if (!m_IsFixing) {
           std::lock_guard<std::mutex> lock(m_ResponseMutex);
           m_ChatHistory.push_back({"AI", pc.explanation, pc.command, false,
                                    pc.success, m_CurrentSafety});
         }
 
+        m_IsFixing = false;
         m_IsThinking = false;
         m_ScrollToBottom = true;
       }
@@ -237,12 +246,20 @@ void Application::Run() {
       if (m_IsLoadingModel) {
           statusStr = "loading model...";
       } else if (m_IsThinking) {
-          std::lock_guard<std::mutex> lock(m_ResponseMutex);
-          statusStr = m_StatusText.empty() ? "thinking..." : m_StatusText;
-          for (auto& c : statusStr) c = (char)tolower(c);
+          {
+              std::lock_guard<std::mutex> lock(m_ResponseMutex);
+              // Use simplified high-level state for the Global Status LCD
+              if (m_StatusText.find("searching") != std::string::npos)
+                  statusStr = "searching...";
+              else
+                  statusStr = "thinking...";
+          }
+      } else if (m_IsExecuting) {
+          statusStr = "executing command...";
       } else {
           statusStr = "system ready";
       }
+      for (auto& c : statusStr) c = (char)tolower(c);
 
       float barWidth = 300.0f;
       float barHeight = 22.0f;
@@ -487,25 +504,45 @@ void Application::Run() {
             status = m_StatusText.empty() ? "AI processing..." : m_StatusText;
         }
 
-        // Interactive pane simplistic pulsing text
         ImGui::Spacing();
-        ImGui::SetCursorPosX(25);
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        float availWidth = ImGui::GetContentRegionAvail().x;
         
-        // Scale font to be prominent but without any capsule/bar graphic
-        ImGui::SetWindowFontScale(1.2f);
-        ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 0.6f + pulse * 0.4f), "%s", status.c_str());
+        // Update the pulse rhythm for the cinematic box
+        pulse = (sinf(time * 4.0f) + 1.0f) * 0.5f;
+
+        // Subtle "Deep Space" glass background
+        ImColor boxBg = ImColor(0.08f, 0.08f, 0.12f, 0.95f);
+        ImColor glowColor = ImColor(0.3f, 0.4f, 0.6f, 0.3f + pulse * 0.1f);
+        
+        // Draw the floating status box with subtle glowing border
+        ImGui::GetWindowDrawList()->AddRectFilled(pos, ImVec2(pos.x + availWidth, pos.y + 45), boxBg, 6.0f);
+        ImGui::GetWindowDrawList()->AddRect(pos, ImVec2(pos.x + availWidth, pos.y + 45), glowColor, 6.0f, 0, 1.5f);
+        
+        // Custom ImGui Animated Spinner
+        ImVec2 spinnerCenter = ImVec2(pos.x + 25.0f, pos.y + 22.5f);
+        float radius = 9.0f;
+        int numSegments = 12;
+        for (int i = 0; i < numSegments; i++) {
+            float a = (float)i / (float)numSegments * 3.14159f * 2.0f;
+            float opacity = (sinf(time * 12.0f - a) + 1.0f) * 0.5f;
+            ImVec2 p1 = ImVec2(spinnerCenter.x + cosf(a) * radius, spinnerCenter.y + sinf(a) * radius);
+            ImGui::GetWindowDrawList()->AddCircleFilled(p1, 2.0f, ImColor(0.4f, 0.6f, 0.9f, opacity));
+        }
+
+        // Align and draw prominent status text in the box (Unified Font Size)
+        ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + 45.0f, ImGui::GetCursorPosY() + 15.0f));
+        ImGui::TextColored(ImVec4(0.7f, 0.8f, 1.0f, 0.8f + pulse * 0.2f), "%s", status.c_str());
         
         // Animated ellipsis
         for (int i = 0; i < 3; i++) {
           float dotOpacity = (sinf(time * 8.0f - i * 1.5f) + 1.0f) * 0.5f;
           ImGui::SameLine(0, 0);
-          ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, dotOpacity), ".");
+          ImGui::TextColored(ImVec4(0.7f, 0.8f, 1.0f, dotOpacity), ".");
         }
         
-        ImGui::SetWindowFontScale(1.0f); // Reset font scale for the rest of the window
-        
-        // Use Dummy to safely push boundaries and grow the parent scrollbar
-        ImGui::Dummy(ImVec2(0, 25.0f));
+        // Use Dummy to safely push boundaries + 50 pixels high to violently guarantee scroll bar reacts visually
+        ImGui::Dummy(ImVec2(0, 50.0f));
 
         // Enforce lock to bottom while computing
         ImGui::SetScrollHereY(1.0f);
@@ -570,18 +607,21 @@ void Application::Run() {
       }
       ImGui::PopStyleColor();
 
-      // Fix it Button - Only if last command failed
+      // Get Help Online Button — only shown when last command failed AND internet is confirmed live
       if (m_LastExitCode != 0 && !m_TerminalOutput.empty() && !m_IsExecuting &&
-          !m_IsThinking) {
-        ImGui::SameLine(paneWidth2Status - 230);
+          !m_IsThinking && m_IsOnline) {
+        ImGui::SameLine(paneWidth2Status - 270);
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 0.6f));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
                               ImVec4(0.9f, 0.3f, 0.3f, 0.8f));
-        if (ImGui::Button("Fix it", ImVec2(100, 26))) {
+        if (ImGui::Button("Get Help Online", ImVec2(140, 26))) {
+          m_IsFixing = true;
           std::string failedCmd = m_LastGeneratedCommand;
+
+          // Full error context preserved — accuracy over tokenization speed
           std::string errorOut = m_TerminalOutput;
 
-          // 1. Retrieve the original intent from the chat history
+          // 1. Retrieve the original intent from the chat history (must be on main thread)
           std::string originalIntent = "Unknown";
           {
               std::lock_guard<std::mutex> lock(m_ResponseMutex);
@@ -593,68 +633,81 @@ void Application::Run() {
               }
           }
 
-          // 2. Fetch RAG Context for original intent
-          std::string ragDocs = "";
-          if (m_RAG) {
-              std::string lowerIntent = originalIntent;
-              for (auto &c : lowerIntent) c = (char)tolower(c);
-              ragDocs = m_RAG->RetrieveContext(lowerIntent);
-          }
-
-          // 3. Construct a Chain-of-Thought style fix prompt
-          std::string fixPrompt = 
-              "Original Goal: " + originalIntent + "\n" +
-              "Command Executed: " + failedCmd + "\n" +
-              "Console Error Output:\n" + errorOut + "\n\n" +
-              "TASK: Analyze the error output. Explain exactly why the command failed. "
-              "Then, provide the corrected Windows PowerShell command in a markdown powershell code block:\n"
-              "```powershell\n[your raw command here]\n```\n";
-              
-          if (!ragDocs.empty()) {
-              fixPrompt += "\nCRITICAL REFERENCE:\n" + ragDocs + "\n";
+          // FIX 2: Immediately write the header to the terminal.
+          // User sees feedback at the exact frame the button is clicked — zero perceived wait.
+          {
+              std::lock_guard<std::mutex> lock(m_ResponseMutex);
+              m_TerminalOutput  = "\n[TECHNICAL RESOLUTION GUIDE]\n";
+              m_TerminalOutput += "================================================================================\n";
+              m_TerminalOutput += "  Searching the web and consulting AI model, please wait...\n";
+              m_TerminalOutput += "================================================================================\n\n";
+              m_ScrollToBottom = true;
           }
 
           // Trigger AI reasoning
           m_IsThinking = true;
           m_ThinkingStartTime = std::chrono::steady_clock::now();
           m_aiResponse = "";
-          m_AiThread = std::async(std::launch::async, [this, fixPrompt, errorOut]() {
+
+          // Capture all context by value to safely cross thread boundaries
+          m_AiThread = std::async(std::launch::async, [this, failedCmd, errorOut, originalIntent]() {
             {
                std::lock_guard<std::mutex> lock(m_ResponseMutex);
-               m_StatusText = "Searching web for solutions...";
-               m_ScrollToBottom = true;
-            }
-            
-            // Clean up the error to a concise search query
-            std::string firstLineError = errorOut;
-            size_t newlinePos = errorOut.find('\n');
-            if (newlinePos != std::string::npos) {
-                firstLineError = errorOut.substr(0, newlinePos);
-            }
-            // Remove carriage returns if any
-            firstLineError.erase(std::remove(firstLineError.begin(), firstLineError.end(), '\r'), firstLineError.end());
-            
-            std::string searchQuery = firstLineError + " powershell solution";
-            
-            // Connect to search engine dynamically using just the top-level error signature
-            std::string webSnippets = WebSearchManager::SearchBrave(searchQuery);
-            std::string hints = "";
-            if (!webSnippets.empty()) {
-                hints = "WEB SEARCH RESULTS FOR THIS ERROR:\n" + webSnippets + "\n";
+               m_StatusText = "Searching web & knowledge base...";
             }
 
-            auto feedback = [this](const std::string &t) {
-              std::lock_guard<std::mutex> lock(m_ResponseMutex);
-              m_aiResponse += t;
-              m_ScrollToBottom = true;
-            };
+            // Broaden search to get both CMD and PowerShell results from the web
+            std::string searchQuery = originalIntent + " windows cmd powershell";
+
+            // FIX 1: Launch RAG and Web Search IN PARALLEL using std::async.
+            // Both IO operations run concurrently. Total wait = max(rag, web), not rag + web.
+            std::future<std::string> ragFuture;
+            if (m_RAG) {
+                std::string lowerIntent = originalIntent;
+                for (auto &c : lowerIntent) c = (char)tolower(c);
+                ragFuture = std::async(std::launch::async, [this, lowerIntent]() {
+                    return m_RAG->RetrieveContext(lowerIntent);
+                });
+            }
+            auto webFuture = std::async(std::launch::async, [searchQuery]() {
+                return WebSearchManager::SearchBrave(searchQuery);
+            });
+
+            // Join both futures — blocks only until the SLOWER of the two completes
+            std::string ragDocs     = ragFuture.valid() ? ragFuture.get() : "";
+            std::string webSnippets = webFuture.get();
+
+            // Build the enriched fix prompt — concise, terminal-first, no verbose templates
+            std::string fixPrompt =
+                "User wants: " + originalIntent + "\n" +
+                "Failed cmd: " + failedCmd + "\n" +
+                "Error: " + errorOut + "\n\n" +
+                "Rules: Reply in plain text only. No markdown. No headers. No repetition.\n"
+                "Keep every line under 80 characters to fit a terminal window.\n"
+                "Do NOT re-explain the error. Do NOT say 'multi-step solution'.\n"
+                "Show the CMD/command prompt command first (if one exists), then the PowerShell equivalent.\n"
+                "If only one shell supports it, show that one and label it clearly.\n"
+                "If multiple steps needed, number them. Be direct and brief.\n";
+
+            std::string hints = "";
+            if (!ragDocs.empty())     hints += "KNOWLEDGE BASE:\n" + ragDocs + "\n";
+            if (!webSnippets.empty()) hints += "WEB SEARCH RESULTS:\n" + webSnippets + "\n";
 
             {
                std::lock_guard<std::mutex> lock(m_ResponseMutex);
                m_StatusText = "Consulting AI model...";
+               // Replace placeholder line with the real output header now that context is assembled
+               m_TerminalOutput = "\n[TECHNICAL RESOLUTION GUIDE]\n";
+               m_TerminalOutput += "================================================================================\n\n";
                m_ScrollToBottom = true;
             }
-            
+
+            auto feedback = [this](const std::string &t) {
+              std::lock_guard<std::mutex> lock(m_ResponseMutex);
+              m_TerminalOutput += t;
+              m_ScrollToBottom = true;
+            };
+
             return m_AI->GenerateCommand(fixPrompt, feedback, hints, false);
           });
         }

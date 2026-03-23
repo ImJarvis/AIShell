@@ -52,6 +52,8 @@ private:
   std::atomic<bool> m_IsThinking = false;
   std::atomic<bool> m_IsExecuting = false;
   std::atomic<bool> m_IsLoadingModel = false;
+  std::atomic<bool> m_IsFixing = {false};
+  std::atomic<bool> m_IsOnline = {false};
   std::atomic<bool> m_StopExecution = {false};
   
   struct ChatMessage {

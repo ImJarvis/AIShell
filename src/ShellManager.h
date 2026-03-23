@@ -233,8 +233,8 @@ public:
     if (isPowerShell) {
       // Encode as Base64 to entirely bypass CMD and powershell quotation issues.
       // We wrap the raw command to suppress CLIXML progress noise and force errors into plaintext streams.
-      // RCA FIX: We also explicitly cache $LASTEXITCODE and $? before the pipeline overwrites them so the C++ parent receives the actual failure code!
-      std::string safeWrapper = "$ProgressPreference='SilentlyContinue'; $err = $false; $out = & { " + command + " } 2>&1; if (!$? -or $LASTEXITCODE) { $err = $true }; $out | Out-String -Stream; if ($err) { exit 1 }";
+      // RCA FIX: Use $global:error to catch cmdlet failures (like Get-WmiObject) that don't set $LASTEXITCODE.
+      std::string safeWrapper = "$ProgressPreference='SilentlyContinue'; $global:error.Clear(); $out = & { " + command + " } 2>&1; $failed = ($global:error.Count -gt 0 -or $LASTEXITCODE -ne 0); $out | Out-String -Stream; if ($failed) { exit 1 }";
       std::string encodedCmd = ps_base64_encode(safeWrapper);
       fullCmdLine =
           "powershell -NoProfile -ExecutionPolicy Bypass -EncodedCommand " + encodedCmd;
